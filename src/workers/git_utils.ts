@@ -16,6 +16,36 @@ export async function prepareGoalWorktree(
   return await prepareTaskWorktree(root, { id: goalId } as Task, configuredWorktreesDir);
 }
 
+// A fan-out sub-worktree branches off the goal's loop branch (not the repo
+// HEAD), so the sub-agent starts from the loop's in-progress state and its
+// branch merges cleanly back into the loop branch.
+export async function prepareFanoutWorktree(
+  root: string,
+  baseBranch: string,
+  subId: string,
+  configuredWorktreesDir = worktreesPath(root),
+): Promise<WorktreeAssignment> {
+  const branchName = `loopforge/fanout-${subId.toLowerCase()}`;
+  const worktreeRoot = path.isAbsolute(configuredWorktreesDir)
+    ? configuredWorktreesDir
+    : path.join(root, configuredWorktreesDir);
+  const worktreePath = path.join(worktreeRoot, `fanout-${subId}`);
+  await Deno.mkdir(worktreeRoot, { recursive: true });
+  await runCommand(root, ["git", "worktree", "prune"]);
+  await runCommand(root, [
+    "git",
+    "worktree",
+    "add",
+    "--force",
+    "-B",
+    branchName,
+    worktreePath,
+    baseBranch,
+  ]);
+  await ensureWorktreeExcludes(worktreePath);
+  return { branchName, worktreePath, created: true };
+}
+
 export async function prepareTaskWorktree(
   root: string,
   task: Task,

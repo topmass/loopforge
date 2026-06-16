@@ -17,6 +17,14 @@ import { isMissingCodexThreadText } from "./codex_event_normalizer.ts";
 import { collectAgentsInstructions } from "./project_context.ts";
 import { gitCommitAll, gitMergeBranch, prepareGoalWorktree, runCommand } from "./git_utils.ts";
 import { probeLights, runGoalProbes } from "./goal_probes.ts";
+import { readWorkflow } from "../workflow/workflow.ts";
+import {
+  FanoutRunner,
+  findScopeConflict,
+  LOOP_FANOUT_TOKEN,
+  parseFanoutRequest,
+  summarizeFanout,
+} from "./fanout.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
 import {
   extractBlockedAsk,
@@ -185,6 +193,33 @@ export class GoalLoopRunner {
             data: { ask, iteration },
           }));
           return this.finish(goalId, iteration, "blocked", ask);
+        }
+
+        // The owner can delegate independent subtasks to parallel sub-agents.
+        // Disjoint write scopes are enforced; the summary feeds the next turn.
+        const fanout = parseFanoutRequest(responseText);
+        if (fanout) {
+          const conflict = findScopeConflict(fanout);
+          if (conflict) {
+            probeFeedback =
+              `Fan-out rejected: write scopes overlap (${conflict}). Re-issue ${LOOP_FANOUT_TOKEN} ` +
+              "with disjoint write scopes, or do the work inline.";
+            continue;
+          }
+          const runner = new FanoutRunner(this.root, this.store, {
+            createCodexClient: this.createCodexClient,
+            onEvent: (event) => this.emit(event),
+            maxConcurrency: readWorkflow(this.root).maxConcurrentAgents,
+            projectInstructions,
+          });
+          const fanoutResult = await runner.run(
+            goalId,
+            assignment.branchName,
+            assignment.worktreePath,
+            fanout,
+          );
+          probeFeedback = summarizeFanout(fanoutResult);
+          continue;
         }
 
         if (signalsComplete(responseText) || loopPlanComplete(items)) {

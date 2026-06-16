@@ -351,3 +351,90 @@ Deno.test("goal loop injects an objective-updated steer when the goal text chang
     await Deno.remove(root, { recursive: true });
   }
 });
+
+// A loop owner that fans out on turn 1, then completes after seeing the summary.
+// Sub-agent turns (title "<goal>-<n>: <name>") write their scoped file.
+class FanoutLoopClient implements CodexClient {
+  ownerTurns = 0;
+  constructor(
+    private readonly onEvent: (
+      e: {
+        taskId: string | null;
+        runId: string | null;
+        role: string;
+        kind: string;
+        message: string;
+      },
+    ) => void,
+  ) {}
+  startSession(cwd: string, _o: CodexSessionOptions = {}): Promise<CodexSession> {
+    return Promise.resolve({ threadId: "t", cwd });
+  }
+  resumeSession(cwd: string, id: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId: id, cwd });
+  }
+  async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    const isOwner = / loop \d+$/.test(input.title);
+    let reply = "";
+    if (isOwner) {
+      this.ownerTurns++;
+      if (this.ownerTurns === 1) {
+        await Deno.writeTextFile(`${session.cwd}/LOOP_PLAN.md`, "# Plan\n- [~] Build both halves\n");
+        reply = `Splitting the work.
+LOOP_FANOUT
+{"subtasks":[
+  {"title":"api","instruction":"write api.txt","writeScope":["api.txt"]},
+  {"title":"ui","instruction":"write ui.txt","writeScope":["ui.txt"]}
+]}`;
+      } else {
+        await Deno.writeTextFile(
+          `${session.cwd}/LOOP_PLAN.md`,
+          "# Plan\n- [x] Build both halves -- both subagents merged\n",
+        );
+        reply = "Integrated both halves.\nLOOP_COMPLETE";
+      }
+    } else {
+      const title = input.title.split(": ").pop() ?? "";
+      const isApi = title.includes("api");
+      await Deno.writeTextFile(
+        `${session.cwd}/${isApi ? "api.txt" : "ui.txt"}`,
+        isApi ? "api\n" : "ui\n",
+      );
+      reply = `${title} done`;
+    }
+    this.onEvent({ taskId: null, runId: null, role: "codex", kind: "agent", message: reply });
+    return { threadId: session.threadId, turnId: "t", status: "completed", completed: true };
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("goal loop delegates a fan-out, merges sub-agents, then completes", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  const events: string[] = [];
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Build both halves in parallel");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 5,
+      onEvent: (e) => events.push(`${e.role}/${e.kind}`),
+      createCodexClient: (onEvent) => new FanoutLoopClient(onEvent),
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "merged");
+    // Both sub-agents' files were merged through the loop branch into the repo.
+    assertEquals(await Deno.readTextFile(`${root}/api.txt`), "api\n");
+    assertEquals(await Deno.readTextFile(`${root}/ui.txt`), "ui\n");
+    const feed = store.listLifecycleEvents(goal.id).map((e) => e.kind);
+    assert(feed.includes("subagent.spawned"));
+    assert(feed.includes("subagent.merged"));
+    assert(feed.includes("goal.closed"));
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});

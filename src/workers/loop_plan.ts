@@ -1,3 +1,4 @@
+import { LOOP_FANOUT_TOKEN } from "./fanout.ts";
 // The goal-loop plan contract: the loop owner maintains LOOP_PLAN.md (a plain
 // markdown checklist) at its worktree root. The file on disk is the source of
 // truth - ralph-style - so a lost thread resumes from the repo, and LoopForge
@@ -72,6 +73,12 @@ export function loopPlanContract(): string {
 - Record decisions, discoveries, and anything the next iteration must know directly in
   ${LOOP_PLAN_FILE} under the relevant item. This file and the repo are your memory.
 - Do not create commits; LoopForge commits the worktree after every turn.
+- To parallelize independent work, you may delegate to sub-agents. Only do this when the pieces
+  have DISJOINT write scopes (no shared files). End your reply with:
+  ${LOOP_FANOUT_TOKEN}
+  {"subtasks":[{"title":"...","instruction":"...","writeScope":["src/api/**"]}, ...]}
+  LoopForge runs each in its own worktree in parallel, enforces the scopes, merges the results
+  back, and reports a summary on your next turn. Do the work inline instead when scopes overlap.
 - When every item is checked and you believe the win conditions pass, end your reply with the
   single line ${LOOP_COMPLETE_TOKEN}.
 - Only when truly blocked by an absolute blocker (credentials, third-party access, destructive
