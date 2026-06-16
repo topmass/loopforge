@@ -9,3 +9,7 @@ coverage/
 /.omx/
 loopforge-architecture-infographic.html
 loopforge-flow-infographic.html
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/

@@ -1067,6 +1067,12 @@ export function startServer(
           return json({ ok: true });
         }
 
+        // The React GUI (app/dist) is served under /app; an SPA so unknown
+        // /app/* routes fall back to its index.html.
+        if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
+          return await serveApp(url.pathname);
+        }
+
         return await serveStatic(url.pathname);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1089,6 +1095,35 @@ export function startServer(
       store.close();
     }),
   };
+}
+
+// Serve the built React GUI from app/dist under /app, SPA-style.
+async function serveApp(pathname: string): Promise<Response> {
+  const appRoot = path.normalize(path.join(APP_ROOT, "app", "dist"));
+  const rel = pathname === "/app" || pathname === "/app/" ? "index.html" : pathname.slice("/app/".length);
+  const target = path.normalize(path.join(appRoot, rel));
+  if (!target.startsWith(appRoot)) {
+    return new Response("Not found", { status: 404 });
+  }
+  try {
+    const content = await Deno.readFile(target);
+    return new Response(content, {
+      headers: { "content-type": contentType(target), "cache-control": "no-store" },
+    });
+  } catch {
+    // SPA fallback: serve index.html for client-side routes / missing assets.
+    try {
+      const content = await Deno.readFile(path.join(appRoot, "index.html"));
+      return new Response(content, {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      });
+    } catch {
+      return new Response(
+        "LoopForge GUI is not built. Run: cd app && pnpm install && pnpm build",
+        { status: 503 },
+      );
+    }
+  }
 }
 
 async function serveStatic(pathname: string): Promise<Response> {
@@ -1116,6 +1151,9 @@ function contentType(target: string): string {
   if (target.endsWith(".html")) return "text/html; charset=utf-8";
   if (target.endsWith(".css")) return "text/css; charset=utf-8";
   if (target.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (target.endsWith(".svg")) return "image/svg+xml";
+  if (target.endsWith(".json")) return "application/json; charset=utf-8";
+  if (target.endsWith(".woff2")) return "font/woff2";
   return "application/octet-stream";
 }
 

@@ -60,6 +60,9 @@ try {
     case "board":
       await serveCommand(args);
       break;
+    case "gui":
+      await guiCommand(args);
+      break;
     case "tui":
       await tuiCommand(args);
       break;
@@ -306,6 +309,40 @@ async function runCommand(args: string[]): Promise<void> {
   } finally {
     store.close();
   }
+}
+
+// One-command launcher for the web GUI: start the server and open the browser
+// at /app. The Tauri desktop wrapper (app/src-tauri) is the native upgrade.
+async function guiCommand(args: string[]): Promise<void> {
+  const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
+  const port = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
+  if (!Number.isInteger(port) || port < 1) {
+    throw new Error("A valid --port value is required.");
+  }
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    await ensureGitRepository(root);
+  } finally {
+    store.close();
+  }
+  const server = startServer(root, port);
+  const appUrl = `${server.url}/app/`;
+  console.log(`LoopForge GUI: ${appUrl}`);
+  if (!args.includes("--no-open")) {
+    const opener = Deno.build.os === "darwin"
+      ? "open"
+      : Deno.build.os === "windows"
+      ? "explorer"
+      : "xdg-open";
+    try {
+      await new Deno.Command(opener, { args: [appUrl], stdout: "null", stderr: "null" })
+        .spawn().status;
+    } catch {
+      console.log("Open the URL above in your browser.");
+    }
+  }
+  await server.finished;
 }
 
 async function serveCommand(args: string[]): Promise<void> {
