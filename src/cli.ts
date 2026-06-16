@@ -453,13 +453,18 @@ async function loopCommand(args: string[]): Promise<void> {
   }
   const iterIndex = args.indexOf("--iterations");
   const maxIterations = iterIndex >= 0 ? Number(args[iterIndex + 1]) : undefined;
+  const tokensIndex = args.indexOf("--tokens");
+  const tokenBudget = tokensIndex >= 0 ? Number(args[tokensIndex + 1]) : undefined;
   const positional = args.filter((arg, index) =>
     !arg.startsWith("-") &&
     (hoursIndex < 0 || index !== hoursIndex + 1) &&
-    (iterIndex < 0 || index !== iterIndex + 1)
+    (iterIndex < 0 || index !== iterIndex + 1) &&
+    (tokensIndex < 0 || index !== tokensIndex + 1)
   );
   if (!positional.length) {
-    throw new Error('Usage: loopforge loop <GOAL-N | "goal text"> [--hours H] [--iterations N]');
+    throw new Error(
+      'Usage: loopforge loop <GOAL-N | "goal text"> [--hours H] [--tokens N] [--iterations N]',
+    );
   }
   const store = new BoardStore(root);
   try {
@@ -489,6 +494,9 @@ async function loopCommand(args: string[]): Promise<void> {
     }
     const runner = new GoalLoopRunner(root, store, {
       hours,
+      tokenBudget: tokenBudget && Number.isFinite(tokenBudget) && tokenBudget > 0
+        ? tokenBudget
+        : undefined,
       maxIterations: maxIterations && Number.isInteger(maxIterations) && maxIterations > 0
         ? maxIterations
         : undefined,
@@ -1409,7 +1417,7 @@ Usage:
   loopforge status
   loopforge hooks [print | install claude | install codex]
   loopforge check [GOAL-ID]
-  loopforge loop GOAL-ID [--hours N] [--iterations N]   # one persistent agent owns the goal
+  loopforge loop <GOAL-ID | "text"> [--hours N] [--tokens N] [--iterations N]   # one agent owns the goal
   loopforge pursue [GOAL-ID | --all] [--hours N] [--iterations N] [--escalate codex]
   loopforge lesson ["text to remember"]
   loopforge scout                            # one scout pass: propose ideas now

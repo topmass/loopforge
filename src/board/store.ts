@@ -779,6 +779,16 @@ export class BoardStore {
     });
   }
 
+  setGoalText(goalId: string, text: string): Goal {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error("Goal text cannot be empty.");
+    }
+    this.getGoal(goalId);
+    this.db.prepare("UPDATE goals SET text = ? WHERE id = ?").run(trimmed, goalId);
+    return this.getGoal(goalId);
+  }
+
   setGoalLoopState(
     goalId: string,
     state: { threadId?: string | null; branch?: string | null; worktree?: string | null },
@@ -1474,6 +1484,39 @@ export class BoardStore {
     ).all(taskId) as SqlRow[]).map(messageFromRow);
   }
 
+  // Goal-level steer queue: adding a task to a goal lands here, and the goal
+  // loop folds pending entries into its plan on the next turn. Separate from
+  // task messages because messages.task_id is foreign-keyed to a task.
+  enqueueGoalMessage(goalId: string, role: string, message: string): ActivityEvent {
+    this.getGoal(goalId);
+    this.db.prepare(
+      "INSERT INTO goal_messages (goal_id, role, message, processed, created_at) VALUES (?, ?, ?, 0, ?)",
+    ).run(goalId, role, message, timestamp());
+    return this.appendEvent(
+      null,
+      null,
+      role,
+      "queue",
+      `Queued task for ${goalId}: ${message}`,
+    );
+  }
+
+  listPendingGoalMessages(goalId: string): QueuedMessage[] {
+    return (this.db.prepare(
+      "SELECT * FROM goal_messages WHERE goal_id = ? AND processed = 0 ORDER BY id ASC",
+    ).all(goalId) as SqlRow[]).map(messageFromRow);
+  }
+
+  markGoalMessagesProcessed(ids: number[]): void {
+    if (!ids.length) {
+      return;
+    }
+    const placeholders = ids.map(() => "?").join(", ");
+    this.db.prepare(
+      `UPDATE goal_messages SET processed = 1 WHERE id IN (${placeholders})`,
+    ).run(...ids);
+  }
+
   markMessagesProcessed(ids: number[]): void {
     if (!ids.length) {
       return;
@@ -1598,6 +1641,15 @@ export class BoardStore {
         last_status TEXT NOT NULL DEFAULT 'pending',
         last_output TEXT NOT NULL DEFAULT '',
         last_run_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS goal_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        message TEXT NOT NULL,
+        processed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS lessons (

@@ -560,9 +560,9 @@ export function startServer(
           if (goalLoopRunning) {
             return json({ error: "A goal loop is already running." }, 409);
           }
-          const body = await readJson<{ text?: string; hours?: number; iterations?: number }>(
-            request,
-          );
+          const body = await readJson<
+            { text?: string; hours?: number; tokens?: number; iterations?: number }
+          >(request);
           const text = body.text?.trim() ?? "";
           if (!text) {
             return json({ error: "Goal text is required." }, 400);
@@ -585,6 +585,9 @@ export function startServer(
           queueMicrotask(() => {
             const runner = new GoalLoopRunner(normalizedRoot, store, {
               hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
+              tokenBudget: typeof body.tokens === "number" && body.tokens > 0
+                ? body.tokens
+                : undefined,
               maxIterations: typeof body.iterations === "number" && body.iterations > 0
                 ? Math.floor(body.iterations)
                 : undefined,
@@ -603,6 +606,44 @@ export function startServer(
           return json({ ok: true, goalId: created.goal.id, running: true }, 201);
         }
 
+        // Add a task to a goal = steer it. The loop owner folds the task into
+        // its plan on the next turn (running now, or when it next runs). One
+        // gesture whether the loop is live or idle.
+        const taskMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/task$/);
+        if (taskMatch && request.method === "POST") {
+          const goalId = decodeURIComponent(taskMatch[1]).toUpperCase();
+          store.getGoal(goalId);
+          const body = await readJson<{ text?: string }>(request);
+          const text = body.text?.trim() ?? "";
+          if (!text) {
+            return json({ error: "Task text is required." }, 400);
+          }
+          store.enqueueGoalMessage(goalId, "user", text);
+          broadcastActivity(store.appendLifecycleEvent({
+            kind: "task.added",
+            goalId,
+            taskId: null,
+            summary: text,
+            data: { text },
+          }));
+          broadcastBoard();
+          return json({ ok: true, goalId });
+        }
+
+        // Edit a goal's objective; the loop injects an objective-updated steer.
+        const objectiveMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/objective$/);
+        if (objectiveMatch && request.method === "POST") {
+          const goalId = decodeURIComponent(objectiveMatch[1]).toUpperCase();
+          const body = await readJson<{ text?: string }>(request);
+          const text = body.text?.trim() ?? "";
+          if (!text) {
+            return json({ error: "Objective text is required." }, 400);
+          }
+          const goal = store.setGoalText(goalId, text);
+          broadcastBoard();
+          return json({ ok: true, goal });
+        }
+
         const loopMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/loop$/);
         if (loopMatch && request.method === "POST") {
           if (goalLoopRunning) {
@@ -610,11 +651,16 @@ export function startServer(
           }
           const goalId = decodeURIComponent(loopMatch[1]).toUpperCase();
           store.getGoal(goalId);
-          const body = await readJson<{ hours?: number; iterations?: number }>(request);
+          const body = await readJson<{ hours?: number; tokens?: number; iterations?: number }>(
+            request,
+          );
           goalLoopRunning = true;
           queueMicrotask(() => {
             const runner = new GoalLoopRunner(normalizedRoot, store, {
               hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
+              tokenBudget: typeof body.tokens === "number" && body.tokens > 0
+                ? body.tokens
+                : undefined,
               maxIterations: typeof body.iterations === "number" && body.iterations > 0
                 ? Math.floor(body.iterations)
                 : undefined,

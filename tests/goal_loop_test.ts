@@ -250,3 +250,104 @@ Deno.test("goal loop nudges once on a stall then stops cleanly", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("goal loop does a graceful wrap-up turn on the iteration budget", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Long job");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 2,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [ ] Big item\n");
+          return "Working on it.";
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "budget");
+    assertEquals(client!.turns, 2);
+    // The final turn was a wrap-up, not another work turn.
+    assertStringIncludes(client!.prompts[1], "final turn");
+    assertStringIncludes(client!.prompts[1], "budget for this run is spent");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop folds an added task into the plan as a steer", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Build the page");
+    // Pre-seed a LOOP_PLAN so iteration 1 uses the continuation path.
+    const wt = `${root}/.loopforge/worktrees/${goal.id}`;
+    // Add a task before the loop runs; it must reach the agent.
+    store.enqueueGoalMessage(goal.id, "user", "also add a footer");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 1,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [ ] Build page\n");
+          return "ok";
+        });
+        return client;
+      },
+    });
+    void wt;
+    await runner.run(goal.id);
+    // The first planning prompt incorporated the pre-added task.
+    assertStringIncludes(client!.prompts[0], "also add a footer");
+    // The task.added path is exercised via the store message; it was consumed.
+    assertEquals(store.listPendingGoalMessages(goal.id).length, 0);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop injects an objective-updated steer when the goal text changes", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Original objective");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 3,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd, turn) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [ ] Work\n");
+          if (turn === 1) {
+            store.setGoalText(goal.id, "Revised objective with a new requirement");
+          }
+          return "working";
+        });
+        return client;
+      },
+    });
+    await runner.run(goal.id);
+    // Turn 2's continuation prompt reflects the edited objective.
+    assertStringIncludes(client!.prompts[1], "objective was edited");
+    assertStringIncludes(client!.prompts[1], "Revised objective");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});

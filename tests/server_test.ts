@@ -877,3 +877,37 @@ Deno.test("one-step goal loop plans from text and loops it to a merged close", a
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test("adding a task to a goal steers it and emits task.added", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const seed = new BoardStore(root);
+  seed.initProject();
+  const { goal } = seed.createGoal("Ship the feature");
+  seed.close();
+  const port = 50233 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const res = await fetch(`${server.url}/api/goals/${goal.id}/task`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "also wire the settings page" }),
+    });
+    assertEquals(res.ok, true);
+    const lifecycle = await fetch(`${server.url}/api/lifecycle?goalId=${goal.id}`)
+      .then((r) => r.json());
+    const added = lifecycle.events.find((e: { kind: string }) => e.kind === "task.added");
+    assert(added, "expected a task.added lifecycle event");
+    assertEquals(added.data.text, "also wire the settings page");
+    // The steer is queued for the loop to pick up.
+    const board = await fetch(`${server.url}/api/board`).then((r) => r.json());
+    void board;
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});

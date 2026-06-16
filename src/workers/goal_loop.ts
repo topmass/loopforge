@@ -30,6 +30,7 @@ import {
 
 export interface GoalLoopOptions {
   hours?: number;
+  tokenBudget?: number;
   maxIterations?: number;
   runMode?: RunMode;
   onEvent?: (event: ActivityEvent) => void;
@@ -78,9 +79,14 @@ export class GoalLoopRunner {
     const projectInstructions = await collectAgentsInstructions(this.root);
 
     let responseText = "";
+    let tokensUsed = 0;
     const codex = this.createCodexClient((event) => {
       if (event.role === "codex" && event.kind === "agent") {
         responseText += event.message;
+      }
+      const total = extractTokenTotal(event);
+      if (total !== null && total > tokensUsed) {
+        tokensUsed = total;
       }
       const activity = { ...event, taskId: event.taskId ?? null, runId: event.runId ?? null };
       if (shouldRecordActivity(activity)) {
@@ -93,20 +99,38 @@ export class GoalLoopRunner {
       let lastFingerprint = "";
       let stalls = 0;
       let probeFeedback = "";
+      let lastObjective = goal.text;
       for (let iteration = 1; iteration <= maxIterations; iteration++) {
-        if (Date.now() >= deadline) {
-          return this.finish(goalId, iteration - 1, "budget", "Time budget exhausted.");
-        }
-        const queued = this.store.listPendingMessages(goalId);
+        // Soft-stop: when the time or token budget is spent (or this is the
+        // last allowed iteration), do ONE graceful wrap-up turn - commit what
+        // exists and record remaining work - instead of cutting hard.
+        const budget = this.options.tokenBudget;
+        const wrapUp: "time" | "tokens" | "iterations" | null =
+          budget && tokensUsed >= budget
+            ? "tokens"
+            : Date.now() >= deadline
+            ? "time"
+            : iteration === maxIterations
+            ? "iterations"
+            : null;
+        // objective-updated: if the goal text changed mid-run, tell the agent.
+        const currentObjective = this.store.getGoal(goalId).text;
+        const objectiveChanged = currentObjective !== lastObjective;
+        lastObjective = currentObjective;
+        const queued = this.store.listPendingGoalMessages(goalId);
         this.emitEvent(
           goalId,
           "iteration",
-          `Loop iteration ${iteration}/${maxIterations} started.`,
+          `Loop iteration ${iteration}/${maxIterations} started.${wrapUp ? ` (wrap-up: ${wrapUp})` : ""}`,
         );
         responseText = "";
         const prompt = iteration === 1 && !await this.planFileExists(assignment.worktreePath)
-          ? this.buildFirstPrompt(goal, projectInstructions)
-          : this.buildContinuationPrompt(queued.map((m) => m.message), probeFeedback);
+          ? this.buildFirstPrompt(goal, projectInstructions, queued.map((m) => m.message))
+          : this.buildContinuationPrompt(queued.map((m) => m.message), probeFeedback, {
+            wrapUp,
+            objectiveChanged,
+            objective: currentObjective,
+          });
         probeFeedback = "";
         try {
           await codex.runTurn(session, {
@@ -126,7 +150,7 @@ export class GoalLoopRunner {
           throw error;
         }
         if (queued.length) {
-          this.store.markMessagesProcessed(queued.map((message) => message.id));
+          this.store.markGoalMessagesProcessed(queued.map((message) => message.id));
         }
 
         const commit = await gitCommitAll(
@@ -139,6 +163,15 @@ export class GoalLoopRunner {
         }
         if (items.length) {
           this.emit(this.store.appendLifecycleEvent(planUpdated(goalId, items)));
+        }
+
+        if (wrapUp) {
+          const reason = wrapUp === "tokens"
+            ? "Token budget reached; wrapped up and committed in-progress work."
+            : wrapUp === "time"
+            ? "Time budget reached; wrapped up and committed in-progress work."
+            : "Iteration budget reached; wrapped up and committed in-progress work.";
+          return this.finish(goalId, iteration, "budget", reason);
         }
 
         const ask = extractBlockedAsk(responseText);
@@ -314,13 +347,19 @@ export class GoalLoopRunner {
     return session;
   }
 
-  private buildFirstPrompt(goal: Goal, projectInstructions: string): string {
+  private buildFirstPrompt(goal: Goal, projectInstructions: string, addedTasks: string[] = []): string {
     const probes = this.store.listProbes(goal.id);
+    const addedBlock = addedTasks.length
+      ? `\nAdditional tasks the user attached to this goal - include each as a plan item:\n${
+        addedTasks.map((t) => `- ${t}`).join("\n")
+      }\n`
+      : "";
     return `You are the LoopForge goal loop owner for ${goal.id}, working in this dedicated worktree until the goal is genuinely done.
 
 ${autonomyContract(this.runMode)}
 Goal:
 ${goal.text}
+${addedBlock}
 
 Win conditions (LoopForge runs these for real; the goal only closes when they pass):
 ${probes.length ? probes.map((probe) => `- ${probe.label}: ${probe.command}`).join("\n") : "- none recorded; your evidence notes carry the proof."}
@@ -333,9 +372,34 @@ ${loopPlanContract()}
 Begin now: create ${LOOP_PLAN_FILE}, then start the first item.`;
   }
 
-  private buildContinuationPrompt(queuedMessages: string[], probeFeedback: string): string {
+  private buildContinuationPrompt(
+    queuedMessages: string[],
+    probeFeedback: string,
+    steer: {
+      wrapUp?: "time" | "tokens" | "iterations" | null;
+      objectiveChanged?: boolean;
+      objective?: string;
+    } = {},
+  ): string {
+    // New user messages are treated as added tasks: the agent folds each into
+    // LOOP_PLAN.md as a real plan item WITH a one-line spec, so the Kanban card
+    // is populated inline - no separate spec-writer agent (which would burn a
+    // slot a local model may not have).
+    const tasksBlock = queuedMessages.length
+      ? `\nNew tasks/direction from the user - fold EACH into ${LOOP_PLAN_FILE} as a new unchecked item, and on the line below it record a one-line spec (what / why / acceptance) so it is fully described, then work the plan:\n${
+        queuedMessages.map((m) => `- ${m}`).join("\n")
+      }\n`
+      : "";
+    const objectiveBlock = steer.objectiveChanged
+      ? `\nThe goal objective was edited. Re-read it and reconcile ${LOOP_PLAN_FILE} with the new objective:\n${steer.objective ?? ""}\n`
+      : "";
+    if (steer.wrapUp) {
+      return `The ${steer.wrapUp} budget for this run is spent. This is your final turn.
+Do NOT start new work. Finish the smallest safe stopping point for the in-progress item, make sure the worktree is in a consistent state, and update ${LOOP_PLAN_FILE}: mark done what is genuinely done and leave the rest unchecked with a short note on what remains.
+${tasksBlock}${objectiveBlock}Do not output LOOP_COMPLETE unless every item is genuinely finished.`;
+    }
     return `Continue the loop. Read ${LOOP_PLAN_FILE}, work the next item, verify it with real commands, and update the file.
-${queuedMessages.length ? `\nMessages from the user:\n${queuedMessages.map((m) => `- ${m}`).join("\n")}\n` : ""}${probeFeedback ? `\n${probeFeedback}\n` : ""}
+${tasksBlock}${objectiveBlock}${probeFeedback ? `\n${probeFeedback}\n` : ""}
 End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> only for a true absolute blocker.`;
   }
 
@@ -373,4 +437,34 @@ End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> o
   private emit(event: ActivityEvent): void {
     this.options.onEvent?.(event);
   }
+}
+
+// Best-effort cumulative token total from a backend event (codex reports it on
+// token-usage events; local/pi may not report it, in which case token budgets
+// simply never trigger and time/iteration budgets still bound the run).
+function extractTokenTotal(event: { kind: string; raw?: unknown }): number | null {
+  if (!/token/i.test(event.kind)) {
+    return null;
+  }
+  return findTokenTotal(event.raw, 0);
+}
+
+function findTokenTotal(value: unknown, depth: number): number | null {
+  if (depth > 6 || !value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of ["total_tokens", "totalTokens", "total", "tokens_used", "tokensUsed"]) {
+    const candidate = record[key];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+  for (const nested of Object.values(record)) {
+    const found = findTokenTotal(nested, depth + 1);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
 }
