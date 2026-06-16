@@ -47,6 +47,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...opts }),
     }),
+  // Restart a task - used to confirm a manual-verification hold (restart =
+  // verified-by-hand, the worker resumes straight to merge).
+  runTask: (taskId: string) =>
+    jsonFetch<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/run`, {
+      method: "POST",
+    }),
 };
 
 // Reconstruct a typed LifecycleEvent from a stored ActivityEvent (role=lifecycle,
