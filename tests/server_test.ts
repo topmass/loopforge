@@ -911,3 +911,47 @@ Deno.test("adding a task to a goal steers it and emits task.added", async () => 
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test("native codex events ingest into the lifecycle feed", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const seed = new BoardStore(root);
+  seed.initProject();
+  const { goal } = seed.createGoal("Native run");
+  seed.close();
+  const port = 50633 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const res = await fetch(`${server.url}/api/lifecycle/ingest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        goalId: goal.id,
+        kind: "turn/plan/updated",
+        raw: { params: { plan: [{ step: "do it", status: "in_progress" }] } },
+      }),
+    });
+    const out = await res.json();
+    assertEquals(out.ingested, true);
+    assertEquals(out.kind, "plan.updated");
+
+    const feed = await fetch(`${server.url}/api/lifecycle?goalId=${goal.id}`).then((r) => r.json());
+    const plan = feed.events.find((e: { kind: string }) => e.kind === "plan.updated");
+    assert(plan, "expected an ingested plan.updated event");
+
+    // Unrecognized native events are accepted but not ingested.
+    const noop = await fetch(`${server.url}/api/lifecycle/ingest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goalId: goal.id, kind: "item/commandExecution/outputDelta" }),
+    }).then((r) => r.json());
+    assertEquals(noop.ingested, false);
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});

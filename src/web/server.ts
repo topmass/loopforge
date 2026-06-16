@@ -20,6 +20,7 @@ import { GoalPlanner } from "../workers/goal_planner.ts";
 import { GoalPursuer } from "../workers/goal_pursuer.ts";
 import { runScout } from "../workers/goal_scout.ts";
 import { GoalLoopRunner } from "../workers/goal_loop.ts";
+import { codexEventToLifecycle } from "../workers/codex_lifecycle_adapter.ts";
 import { runGoalProbes } from "../workers/goal_probes.ts";
 import { GoalReviewer } from "../workers/goal_reviewer.ts";
 import { LoopForgeWorker } from "../workers/loopforge_worker.ts";
@@ -159,6 +160,30 @@ export function startServer(
         if (url.pathname === "/api/lifecycle" && request.method === "GET") {
           const goalId = url.searchParams.get("goalId") ?? undefined;
           return json({ events: store.listLifecycleEvents(goalId) });
+        }
+
+        // Observed mode: a native Codex run (its own /goal or multi_agent,
+        // forwarded by the installed hook) ingests here, translated into the
+        // same lifecycle feed so it populates the board too.
+        if (url.pathname === "/api/lifecycle/ingest" && request.method === "POST") {
+          const body = await readJson<
+            { goalId?: string; kind?: string; message?: string; raw?: unknown }
+          >(request);
+          const goalId = body.goalId?.trim();
+          const kind = body.kind?.trim();
+          if (!goalId || !kind) {
+            return json({ error: "goalId and kind are required." }, 400);
+          }
+          const lifecycle = codexEventToLifecycle(goalId, {
+            kind,
+            message: body.message,
+            raw: body.raw,
+          });
+          if (!lifecycle) {
+            return json({ ok: true, ingested: false });
+          }
+          broadcastActivity(store.appendLifecycleEvent(lifecycle));
+          return json({ ok: true, ingested: true, kind: lifecycle.kind });
         }
 
         if (url.pathname === "/api/config" && request.method === "GET") {
