@@ -15,7 +15,13 @@ import { createAgentClient } from "./agent_backend.ts";
 import { CodexClient, CodexSession } from "./codex_app_server.ts";
 import { isMissingCodexThreadText } from "./codex_event_normalizer.ts";
 import { collectAgentsInstructions } from "./project_context.ts";
-import { gitCommitAll, gitMergeBranch, prepareGoalWorktree, runCommand } from "./git_utils.ts";
+import {
+  ensureGitRepository,
+  gitCommitAll,
+  gitMergeBranch,
+  prepareGoalWorktree,
+  runCommand,
+} from "./git_utils.ts";
 import { probeLights, runGoalProbes } from "./goal_probes.ts";
 import { readWorkflow } from "../workflow/workflow.ts";
 import {
@@ -79,6 +85,11 @@ export class GoalLoopRunner {
     }
     const deadline = Date.now() + (this.options.hours ?? 2) * 3_600_000;
     const maxIterations = this.options.maxIterations ?? 48;
+    // Lazily ensure the project is its own git repo with a baseline commit -
+    // deferred here (not at GUI launch) so opening the dashboard is instant.
+    for (const action of await ensureGitRepository(this.root)) {
+      this.emitEvent(goalId, "git", action);
+    }
     const assignment = await prepareGoalWorktree(this.root, goalId);
     this.store.setGoalLoopState(goalId, {
       branch: assignment.branchName,

@@ -210,8 +210,10 @@ async function pathExists(target: string): Promise<boolean> {
 }
 
 export async function ensureWorktreeExcludes(cwd: string): Promise<void> {
-  const excludePath = (await runCommand(cwd, ["git", "rev-parse", "--git-path", "info/exclude"]))
-    .trim();
+  // Absolute git dir so the exclude path resolves correctly no matter the Deno
+  // process cwd (a relative git-path would point at the wrong directory).
+  const gitDir = (await runCommand(cwd, ["git", "rev-parse", "--absolute-git-dir"])).trim();
+  const excludePath = path.join(gitDir, "info", "exclude");
   const current = await Deno.readTextFile(excludePath).catch(() => "");
   const additions = [".omx/", ".loopforge/"].filter((entry) =>
     !current.split(/\r?\n/).includes(entry)
@@ -219,6 +221,7 @@ export async function ensureWorktreeExcludes(cwd: string): Promise<void> {
   if (!additions.length) {
     return;
   }
+  await Deno.mkdir(path.join(gitDir, "info"), { recursive: true }).catch(() => {});
   const prefix = current && !current.endsWith("\n") ? "\n" : "";
   await Deno.writeTextFile(excludePath, `${current}${prefix}${additions.join("\n")}\n`);
 }
@@ -344,12 +347,18 @@ export async function gitMergeBranch(root: string, branchName: string): Promise<
 
 export async function ensureGitRepository(root: string): Promise<string[]> {
   const actions: string[] = [];
-  if (!await isGitRepo(root)) {
+  // The project must be its OWN git repo root. If it merely sits INSIDE a larger
+  // repo (e.g. an accidental `git init` in $HOME), adopting that parent would
+  // make `git add -A` stage the entire parent tree - gigabytes, and a hang.
+  // So init a LOCAL repo right in this directory instead.
+  if (!await isOwnRepoRoot(root)) {
     await runCommand(root, ["git", "init", "-b", "main"]);
-    actions.push("Initialized git repository.");
+    actions.push("Initialized a local git repository for this project.");
   }
 
   if (!await hasHeadCommit(root)) {
+    // Keep the baseline fast and clean: never stage heavy build/dependency dirs.
+    await writeBaselineExcludes(root);
     await runCommand(root, ["git", "add", "-A"]);
     await runCommand(root, [
       "git",
@@ -366,6 +375,51 @@ export async function ensureGitRepository(root: string): Promise<string[]> {
   }
 
   return actions;
+}
+
+// True only when `root` is itself the top level of a git repo - not when it is
+// a subdirectory of a parent repo, and not when it is outside any repo.
+async function isOwnRepoRoot(root: string): Promise<boolean> {
+  try {
+    const top = (await runCommand(root, ["git", "rev-parse", "--show-toplevel"])).trim();
+    return top !== "" && path.resolve(top) === path.resolve(root);
+  } catch {
+    return false;
+  }
+}
+
+// Common heavy/noise dirs go into .git/info/exclude so the one-time baseline
+// commit does not walk node_modules, build output, virtualenvs, etc.
+async function writeBaselineExcludes(root: string): Promise<void> {
+  const heavy = [
+    "/.loopforge/",
+    "/.omx/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    "target/",
+    ".next/",
+    ".venv/",
+    "venv/",
+    "__pycache__/",
+    ".cache/",
+    "*.log",
+  ];
+  try {
+    // --absolute-git-dir so the exclude path is correct regardless of the
+    // Deno process cwd (relative git-path would resolve against the wrong dir).
+    const gitDir = (await runCommand(root, ["git", "rev-parse", "--absolute-git-dir"])).trim();
+    const excludePath = path.join(gitDir, "info", "exclude");
+    const current = await Deno.readTextFile(excludePath).catch(() => "");
+    const additions = heavy.filter((entry) => !current.split(/\r?\n/).includes(entry));
+    if (additions.length) {
+      await Deno.mkdir(path.join(gitDir, "info"), { recursive: true }).catch(() => {});
+      const prefix = current && !current.endsWith("\n") ? "\n" : "";
+      await Deno.writeTextFile(excludePath, `${current}${prefix}${additions.join("\n")}\n`);
+    }
+  } catch {
+    // Excludes are best effort; the baseline still works without them.
+  }
 }
 
 export async function isGitRepo(root: string): Promise<boolean> {

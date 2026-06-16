@@ -345,10 +345,12 @@ async function guiCommand(args: string[]): Promise<void> {
   if (port !== requested) {
     console.log(`Port ${requested} was busy; using ${port}.`);
   }
+  // Opening the dashboard must be instant - it does NOT touch git. The git
+  // baseline (which can be slow on first adoption) happens lazily when a goal
+  // actually starts, inside the goal loop.
   const store = new BoardStore(root);
   try {
     store.initProject();
-    await ensureGitRepository(root);
   } finally {
     store.close();
   }
