@@ -23,7 +23,7 @@ async function bootstrap() {
         kind: event.kind,
         message: event.summary,
         createdAt: "",
-        rawJson: JSON.stringify({ goalId: event.goalId, data: event.data }),
+        rawJson: JSON.stringify({ goalId: event.goalId, taskRef: event.taskId, data: event.data }),
       } as Parameters<typeof store.applyActivity>[0]);
     }
   } catch {

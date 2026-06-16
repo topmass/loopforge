@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "./store";
 import { api } from "./api";
 import type { PlanStep } from "./types";
+import { NodeView } from "./NodeView";
 
 export function App() {
   const conn = useStore((s) => s.conn);
@@ -22,7 +23,7 @@ export function App() {
             ? <EmptyState />
             : view === "kanban"
             ? <KanbanView goalId={activeGoal.id} />
-            : <NodePlaceholder />}
+            : <NodeView goalId={activeGoal.id} />}
         </main>
         <DetailPanel />
       </div>
@@ -165,14 +166,6 @@ function KanbanView({ goalId }: { goalId: string }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function NodePlaceholder() {
-  return (
-    <div className="flex flex-1 items-center justify-center text-slate-500">
-      Node view (planet system) arrives in Phase C.
     </div>
   );
 }

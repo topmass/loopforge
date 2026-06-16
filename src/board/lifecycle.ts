@@ -45,6 +45,7 @@ export interface LifecycleEvent {
 
 interface LifecyclePayload {
   goalId: string | null;
+  taskRef: string | null;
   data: Record<string, unknown>;
 }
 
@@ -60,12 +61,15 @@ export function lifecycleToActivity(event: LifecycleEvent): {
   raw: LifecyclePayload;
 } {
   return {
-    taskId: event.taskId,
+    // Lifecycle taskId references plan steps / sub-agents that are not rows in
+    // the tasks table, so it must NOT go in the FK'd events.task_id column - it
+    // rides in the payload instead. The column stays null.
+    taskId: null,
     runId: null,
     role: LIFECYCLE_ROLE,
     kind: event.kind,
     message: event.summary,
-    raw: { goalId: event.goalId, data: event.data },
+    raw: { goalId: event.goalId, taskRef: event.taskId, data: event.data },
   };
 }
 
@@ -80,11 +84,13 @@ export function parseLifecycleEvent(event: ActivityEvent): LifecycleEvent | null
     return null;
   }
   let goalId: string | null = null;
+  let taskRef: string | null = null;
   let data: Record<string, unknown> = {};
   if (event.rawJson) {
     try {
       const parsed = JSON.parse(event.rawJson) as Partial<LifecyclePayload>;
       goalId = typeof parsed.goalId === "string" ? parsed.goalId : null;
+      taskRef = typeof parsed.taskRef === "string" ? parsed.taskRef : null;
       data = parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.data)
         ? parsed.data as Record<string, unknown>
         : {};
@@ -95,7 +101,7 @@ export function parseLifecycleEvent(event: ActivityEvent): LifecycleEvent | null
   return {
     kind: event.kind as LifecycleKind,
     goalId,
-    taskId: event.taskId,
+    taskId: taskRef ?? event.taskId,
     summary: event.message,
     data,
   };

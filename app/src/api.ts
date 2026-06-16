@@ -61,8 +61,11 @@ export function parseLifecycle(event: ActivityEvent & { rawJson?: string | null 
   const raw = (event as { rawJson?: string | null }).rawJson;
   if (raw) {
     try {
-      const parsed = JSON.parse(raw) as { goalId?: string; data?: Record<string, unknown> };
+      const parsed = JSON.parse(raw) as { goalId?: string; taskRef?: string; data?: Record<string, unknown> };
       goalId = typeof parsed.goalId === "string" ? parsed.goalId : null;
+      if (typeof parsed.taskRef === "string") {
+        event = { ...event, taskId: parsed.taskRef };
+      }
       data = parsed.data ?? {};
     } catch {
       // keep summary-only
