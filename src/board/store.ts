@@ -13,6 +13,7 @@ import {
   worktreesPath,
 } from "../paths.ts";
 import { PROMPTS } from "./prompts.ts";
+import { LifecycleEvent, lifecycleToActivity, parseLifecycleEvent } from "./lifecycle.ts";
 import { ensureAgentContext, ensureWorkflow } from "../workflow/workflow.ts";
 import { summarizeGoalProgress } from "./goal_progress.ts";
 import {
@@ -1427,6 +1428,31 @@ export class BoardStore {
       event.message,
       event.raw,
     );
+  }
+
+  // Emit a canonical lifecycle event onto the same stream subscribers already
+  // read. Returns the stored ActivityEvent so callers can broadcast it.
+  appendLifecycleEvent(event: LifecycleEvent): ActivityEvent {
+    const activity = lifecycleToActivity(event);
+    return this.appendEvent(
+      activity.taskId,
+      activity.runId,
+      activity.role,
+      activity.kind,
+      activity.message,
+      activity.raw,
+    );
+  }
+
+  // The typed lifecycle feed for a goal (or all goals), newest last, for the
+  // Kanban and any external dashboard.
+  listLifecycleEvents(goalId?: string, limit = 500): LifecycleEvent[] {
+    // listEvents is already chronological (oldest first); the dashboard replays
+    // the feed in order, so do not reverse again.
+    const events = this.listEvents(limit)
+      .map(parseLifecycleEvent)
+      .filter((event): event is LifecycleEvent => event !== null);
+    return goalId ? events.filter((event) => event.goalId === goalId) : events;
   }
 
   enqueueMessage(taskId: string, role: string, message: string): ActivityEvent {

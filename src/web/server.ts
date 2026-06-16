@@ -154,6 +154,13 @@ export function startServer(
           return json(store.getBoard());
         }
 
+        // The canonical typed lifecycle feed - the dashboard/Kanban subscribes
+        // here for plan steps, subagents, and goal state across all backends.
+        if (url.pathname === "/api/lifecycle" && request.method === "GET") {
+          const goalId = url.searchParams.get("goalId") ?? undefined;
+          return json({ events: store.listLifecycleEvents(goalId) });
+        }
+
         if (url.pathname === "/api/config" && request.method === "GET") {
           return json(readConfig(normalizedRoot));
         }

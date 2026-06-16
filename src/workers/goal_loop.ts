@@ -10,6 +10,7 @@ import path from "node:path";
 import { BoardStore } from "../board/store.ts";
 import { ActivityEvent, ActivityEventInput, Goal } from "../board/types.ts";
 import { autonomyContract, RunMode } from "../board/prompts.ts";
+import { planUpdated } from "../board/lifecycle.ts";
 import { createAgentClient } from "./agent_backend.ts";
 import { CodexClient, CodexSession } from "./codex_app_server.ts";
 import { isMissingCodexThreadText } from "./codex_event_normalizer.ts";
@@ -136,10 +137,20 @@ export class GoalLoopRunner {
         for (const event of this.store.syncLoopPlanTasks(goalId, items)) {
           this.emit(event);
         }
+        if (items.length) {
+          this.emit(this.store.appendLifecycleEvent(planUpdated(goalId, items)));
+        }
 
         const ask = extractBlockedAsk(responseText);
         if (ask) {
           this.emitEvent(goalId, "blocked", `Loop blocked: ${ask}`);
+          this.emit(this.store.appendLifecycleEvent({
+            kind: "goal.blocked",
+            goalId,
+            taskId: null,
+            summary: ask,
+            data: { ask, iteration },
+          }));
           return this.finish(goalId, iteration, "blocked", ask);
         }
 
@@ -211,6 +222,13 @@ export class GoalLoopRunner {
     const evidence = summary.total
       ? `Win conditions ${summary.passed}/${summary.total} passed in the loop worktree.`
       : "No probes recorded; loop plan fully checked with evidence notes.";
+    this.emit(this.store.appendLifecycleEvent({
+      kind: "verified",
+      goalId,
+      taskId: null,
+      summary: evidence,
+      data: { total: summary.total, passed: summary.passed },
+    }));
     const plan = parseLoopPlan(
       await this.readPlanFile(this.store.getGoal(goalId).loopWorktree ?? this.root),
     );
@@ -266,6 +284,13 @@ export class GoalLoopRunner {
       force: true,
     });
     this.emit(result.event);
+    this.emit(this.store.appendLifecycleEvent({
+      kind: "goal.closed",
+      goalId,
+      taskId: null,
+      summary: `${evidence} Merged ${branchName}.`,
+      data: { branch: branchName, iterations },
+    }));
     return this.finish(goalId, iterations, "merged", `${evidence} Merged ${branchName}.`);
   }
 

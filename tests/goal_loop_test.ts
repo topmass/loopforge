@@ -129,6 +129,16 @@ Deno.test("goal loop plans, mirrors the checklist, passes probes, and merges una
     // The relay intake task is settled, never left dispatchable under a closed goal.
     assertEquals(store.getTask("TASK-1").status, "done");
     assert(events.some((line) => line.includes("loop/merge")));
+
+    // The canonical lifecycle feed captured the run for the dashboard.
+    const feed = store.listLifecycleEvents(goal.id);
+    const kinds = feed.map((e) => e.kind);
+    assert(kinds.includes("plan.updated"), `expected plan.updated, got ${kinds.join(",")}`);
+    assert(kinds.includes("verified"));
+    assert(kinds.includes("goal.closed"));
+    const lastPlan = [...feed].reverse().find((e) => e.kind === "plan.updated");
+    const steps = lastPlan!.data.steps as Array<{ status: string }>;
+    assert(steps.every((s) => s.status === "done"));
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });
