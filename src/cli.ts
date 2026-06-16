@@ -311,13 +311,37 @@ async function runCommand(args: string[]): Promise<void> {
   }
 }
 
+// Find the first free port at or after `start`, so the GUI launcher never dies
+// on a leftover server holding the default port.
+function findFreePort(start: number): number {
+  for (let candidate = start; candidate < start + 100; candidate++) {
+    try {
+      const listener = Deno.listen({ port: candidate });
+      listener.close();
+      return candidate;
+    } catch (error) {
+      if (error instanceof Deno.errors.AddrInUse) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`No free port found in ${start}-${start + 100}.`);
+}
+
 // One-command launcher for the web GUI: start the server and open the browser
 // at /app. The Tauri desktop wrapper (app/src-tauri) is the native upgrade.
 async function guiCommand(args: string[]): Promise<void> {
   const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
-  const port = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
-  if (!Number.isInteger(port) || port < 1) {
+  const requested = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
+  if (!Number.isInteger(requested) || requested < 1) {
     throw new Error("A valid --port value is required.");
+  }
+  // Each GUI run serves THIS project; if the port is taken (another LoopForge
+  // server, a leftover), pick the next free one instead of crashing.
+  const port = findFreePort(requested);
+  if (port !== requested) {
+    console.log(`Port ${requested} was busy; using ${port}.`);
   }
   const store = new BoardStore(root);
   try {
