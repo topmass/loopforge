@@ -332,6 +332,8 @@ function findFreePort(start: number): number {
 // One-command launcher for the web GUI: start the server and open the browser
 // at /app. The Tauri desktop wrapper (app/src-tauri) is the native upgrade.
 async function guiCommand(args: string[]): Promise<void> {
+  // Print immediately so the launcher never looks frozen while the server boots.
+  console.log(`Starting LoopForge GUI for ${root} ...`);
   const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
   const requested = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
   if (!Number.isInteger(requested) || requested < 1) {
@@ -352,7 +354,8 @@ async function guiCommand(args: string[]): Promise<void> {
   }
   const server = startServer(root, port);
   const appUrl = `${server.url}/app/`;
-  console.log(`LoopForge GUI: ${appUrl}`);
+  console.log(`LoopForge GUI ready: ${appUrl}`);
+  console.log("Leave this running; press Ctrl+C to stop the server.");
   if (!args.includes("--no-open")) {
     const opener = Deno.build.os === "darwin"
       ? "open"
@@ -360,11 +363,22 @@ async function guiCommand(args: string[]): Promise<void> {
       ? "explorer"
       : "xdg-open";
     try {
-      await new Deno.Command(opener, { args: [appUrl], stdout: "null", stderr: "null" })
-        .spawn().status;
+      // Spawn detached and do NOT await: some desktops' openers block until the
+      // browser closes, which would otherwise hang the launcher.
+      new Deno.Command(opener, { args: [appUrl], stdout: "null", stderr: "null" }).spawn();
     } catch {
       console.log("Open the URL above in your browser.");
     }
+  }
+  // Clean shutdown on Ctrl+C so the port releases promptly for the next run.
+  const stop = () => {
+    console.log("\nStopping LoopForge GUI.");
+    server.shutdown();
+  };
+  try {
+    Deno.addSignalListener("SIGINT", stop);
+  } catch {
+    // Signal listeners are unavailable on some platforms; Ctrl+C still exits.
   }
   await server.finished;
 }

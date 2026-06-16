@@ -8,14 +8,17 @@ while [ -L "$SOURCE" ]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-if command -v mise >/dev/null 2>&1; then
-  exec mise x deno@2 -- deno run --allow-read --allow-write --allow-run --allow-net --allow-env "$SCRIPT_DIR/src/cli.ts" "$@"
+ARGS=(run --allow-read --allow-write --allow-run --allow-net --allow-env "$SCRIPT_DIR/src/cli.ts" "$@")
+# Prefer an already-installed deno (instant) over mise, which can silently try
+# to resolve/install a deno toolchain on first use and look like a hang.
+if [ -x "$HOME/.deno/bin/deno" ]; then
+  exec "$HOME/.deno/bin/deno" "${ARGS[@]}"
 fi
 if command -v deno >/dev/null 2>&1; then
-  exec deno run --allow-read --allow-write --allow-run --allow-net --allow-env "$SCRIPT_DIR/src/cli.ts" "$@"
+  exec deno "${ARGS[@]}"
 fi
-if [ -x "$HOME/.deno/bin/deno" ]; then
-  exec "$HOME/.deno/bin/deno" run --allow-read --allow-write --allow-run --allow-net --allow-env "$SCRIPT_DIR/src/cli.ts" "$@"
+if command -v mise >/dev/null 2>&1; then
+  exec mise x deno@2 -- deno "${ARGS[@]}"
 fi
-echo "loopforge: install mise or deno to run the CLI." >&2
+echo "loopforge: install deno (https://deno.com) or mise to run the CLI." >&2
 exit 127
