@@ -183,17 +183,49 @@ function Pulses({ steps }: { steps: PlanStep[] }) {
   );
 }
 
+// Sub-agents orbit on an outer ring as labeled satellites of the core.
+function Subagent(
+  { title, state, position }: {
+    title: string;
+    state: "running" | "merged";
+    position: [number, number, number];
+  },
+) {
+  const mesh = useRef<THREE.Mesh>(null);
+  useFrame((s) => {
+    if (mesh.current && state === "running") {
+      const mat = mesh.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 0.4 + Math.sin(s.clock.elapsedTime * 5) * 0.35;
+    }
+  });
+  const color = state === "merged" ? "#38bdf8" : "#a78bfa";
+  return (
+    <group position={position}>
+      <Line points={[[0, 0, 0], [-position[0], -position[1], 0]]} color="#312e54" lineWidth={1} />
+      <mesh ref={mesh}>
+        <icosahedronGeometry args={[0.32, 0]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.5} roughness={0.4} />
+      </mesh>
+      <Text position={[0, 0.6, 0]} fontSize={0.22} color="#a5b4fc" anchorX="center" maxWidth={3}>
+        {title.slice(0, 32)}
+      </Text>
+    </group>
+  );
+}
+
 export function NodeView({ goalId }: { goalId: string }) {
   const steps = useStore((s) => s.planByGoal[goalId]) ?? [];
+  const subagents = useStore((s) => s.subagentsByGoal[goalId]) ?? [];
   const probes = useStore((s) => s.board?.probes ?? []);
   const selectedTaskId = useStore((s) => s.selectedTaskId);
   const selectTask = useStore((s) => s.selectTask);
   const goalProbes = probes.filter((p) => p.goalId === goalId);
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
+  const subRadius = RADIUS + 2.6;
 
   return (
     <div className="relative min-h-0 flex-1">
-      <Canvas camera={{ position: [0, 0, 11], fov: 50 }} onPointerMissed={() => selectTask(null)}>
+      <Canvas camera={{ position: [0, 0, 13], fov: 50 }} onPointerMissed={() => selectTask(null)}>
         <ambientLight intensity={0.6} />
         <pointLight position={[0, 0, 6]} intensity={1.2} />
         <Core passed={passed} total={goalProbes.length} />
@@ -206,13 +238,23 @@ export function NodeView({ goalId }: { goalId: string }) {
             onSelect={() => selectTask(step.title)}
           />
         ))}
+        {subagents.map((sa, i) => {
+          const angle = (i / Math.max(subagents.length, 1)) * Math.PI * 2 - Math.PI / 2 + 0.4;
+          return (
+            <Subagent
+              key={`sa-${i}-${sa.title}`}
+              title={sa.title}
+              state={sa.state}
+              position={[Math.cos(angle) * subRadius, Math.sin(angle) * subRadius, 0]}
+            />
+          );
+        })}
         <Pulses steps={steps} />
       </Canvas>
-      {steps.length === 0 && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-slate-500">
-          Waiting for the agent's plan...
-        </div>
-      )}
+      <div className="pointer-events-none absolute left-3 top-3 text-xs text-slate-500">
+        <span className="text-orange-400">●</span> main agent ·{" "}
+        <span className="text-violet-400">◆</span> sub-agents ({subagents.length})
+      </div>
     </div>
   );
 }

@@ -53,6 +53,10 @@ export const api = {
     jsonFetch<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/run`, {
       method: "POST",
     }),
+  deleteGoal: (goalId: string) =>
+    jsonFetch<{ ok: boolean }>(`/api/goals/${encodeURIComponent(goalId)}`, {
+      method: "DELETE",
+    }),
 };
 
 // Reconstruct a typed LifecycleEvent from a stored ActivityEvent (role=lifecycle,

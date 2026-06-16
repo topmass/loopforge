@@ -182,8 +182,16 @@ function Sidebar() {
   const activeGoalId = useStore((s) => s.activeGoalId);
   const setActiveGoal = useStore((s) => s.setActiveGoal);
   const goals = board?.goals ?? [];
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  const remove = async (id: string) => {
+    await api.deleteGoal(id);
+    setConfirming(null);
+    if (activeGoalId === id) setActiveGoal(null);
+  };
+
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-slate-800 bg-slate-900/40">
+    <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900/40">
       <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
         Spaces
       </div>
@@ -192,24 +200,59 @@ function Sidebar() {
           <div className="px-3 py-2 text-sm text-slate-500">No goal yet. Describe one below.</div>
         )}
         {goals.map((g) => (
-          <button
+          <div
             key={g.id}
-            type="button"
-            onClick={() => setActiveGoal(g.id)}
-            className={`block w-full px-3 py-2 text-left text-sm ${
-              g.id === activeGoalId ? "bg-slate-800 text-white" : "text-slate-300 hover:bg-slate-800/50"
+            className={`group flex items-center ${
+              g.id === activeGoalId ? "bg-slate-800" : "hover:bg-slate-800/50"
             }`}
           >
-            <span className="flex items-center gap-2">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  g.status === "open" ? "bg-orange-400" : "bg-emerald-400"
-                }`}
-              />
-              <span className="truncate">{g.text}</span>
-            </span>
-            <span className="text-xs text-slate-500">{g.id} · {g.status}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveGoal(g.id)}
+              className="min-w-0 flex-1 px-3 py-2 text-left text-sm"
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    g.status === "open" ? "bg-orange-400" : "bg-emerald-400"
+                  }`}
+                />
+                <span className={`truncate ${g.id === activeGoalId ? "text-white" : "text-slate-300"}`}>
+                  {g.text}
+                </span>
+              </span>
+              <span className="text-xs text-slate-500">{g.id} · {g.status}</span>
+            </button>
+            {confirming === g.id
+              ? (
+                <span className="flex shrink-0 items-center gap-1 pr-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => void remove(g.id)}
+                    className="rounded bg-red-600 px-1.5 py-0.5 text-white"
+                  >
+                    delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(null)}
+                    className="text-slate-400 hover:text-slate-200"
+                  >
+                    cancel
+                  </button>
+                </span>
+              )
+              : (
+                <button
+                  type="button"
+                  onClick={() => setConfirming(g.id)}
+                  title="Remove space"
+                  className="shrink-0 px-2 py-2 text-slate-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+              )}
+          </div>
         ))}
       </div>
     </aside>
@@ -233,11 +276,7 @@ function KanbanView({ goalId }: { goalId: string }) {
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
 
   if (steps.length === 0) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-slate-500">
-        Waiting for the agent's plan...
-      </div>
-    );
+    return <IdlePlan goalId={goalId} />;
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -284,6 +323,43 @@ function EmptyState() {
         Type what you want built below. LoopForge plans it, runs one agent that owns the goal, and
         shows its plan here live.
       </div>
+    </div>
+  );
+}
+
+// An open goal with no plan yet: its loop is not running. Offer to start it so
+// the owning agent plans and works live - like kicking off a Codex goal.
+function IdlePlan({ goalId }: { goalId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const start = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.loopExistingGoal(goalId);
+      setNote("Loop started - the agent is planning. Its plan will appear here live.");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-400">
+      <div className="text-lg">No plan yet for {goalId}</div>
+      <div className="max-w-md text-sm text-slate-500">
+        Start this goal's loop and one agent will own it - planning, working, and verifying - with
+        its plan streaming here. Add tasks any time below to steer it.
+      </div>
+      <button
+        type="button"
+        onClick={() => void start()}
+        disabled={busy}
+        className="rounded-md bg-orange-500 px-4 py-2 text-sm font-medium text-slate-950 disabled:opacity-50"
+      >
+        {busy ? "Starting..." : "Run this goal's loop"}
+      </button>
+      {note && <div className="max-w-md text-xs text-slate-400">{note}</div>}
     </div>
   );
 }

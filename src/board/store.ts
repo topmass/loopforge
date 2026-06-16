@@ -393,6 +393,24 @@ export class BoardStore {
     );
   }
 
+  // Remove a goal and everything scoped to it (tasks -> runs cascade, plus
+  // probes and goal messages). Lifecycle events keep their payload goalId but
+  // are harmless orphans once the goal is gone from the board.
+  deleteGoal(goalId: string): ActivityEvent {
+    this.getGoal(goalId);
+    this.db.prepare(
+      "UPDATE runs SET status = 'failed', finished_at = ? WHERE task_id IN (SELECT id FROM tasks WHERE goal_id = ?) AND status = 'running'",
+    ).run(timestamp(), goalId);
+    this.db.prepare("DELETE FROM goals WHERE id = ?").run(goalId);
+    return this.appendEvent(
+      null,
+      null,
+      "user",
+      "delete",
+      `Deleted ${goalId} and its tasks. Any branches/worktrees were left on disk.`,
+    );
+  }
+
   clearDoneTasks(): { count: number; event: ActivityEvent } {
     const rows = this.db.prepare("SELECT id FROM tasks WHERE status = 'done'").all() as SqlRow[];
     const ids = rows.map((row) => String(row.id));

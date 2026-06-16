@@ -504,6 +504,15 @@ export function startServer(
           return json({ ok: true, ...result });
         }
 
+        const deleteGoalMatch = url.pathname.match(/^\/api\/goals\/([^/]+)$/);
+        if (deleteGoalMatch && request.method === "DELETE") {
+          const goalId = decodeURIComponent(deleteGoalMatch[1]).toUpperCase();
+          const event = store.deleteGoal(goalId);
+          broadcastActivity(event);
+          broadcastBoard();
+          return json({ ok: true, goalId });
+        }
+
         if (url.pathname === "/api/tasks" && request.method === "POST") {
           const body = await readJson<{
             title?: string;

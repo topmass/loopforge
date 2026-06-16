@@ -23,6 +23,9 @@ interface AppState {
   activity: ActivityEvent[];
   // The most recent plan.updated step list per goal - the Kanban/planet source.
   planByGoal: Record<string, PlanStep[]>;
+  // Sub-agents spawned by the loop owner, per goal - distinct nodes in the
+  // planet view (the main agent is the core; these are its satellites).
+  subagentsByGoal: Record<string, { title: string; state: "running" | "merged" }[]>;
   activeGoalId: string | null;
   selectedTaskId: string | null;
   // Transient pulse events for the planet view to animate, keyed by an id.
@@ -45,6 +48,7 @@ export const useStore = create<AppState>((set) => ({
   lifecycle: [],
   activity: [],
   planByGoal: {},
+  subagentsByGoal: {},
   activeGoalId: null,
   selectedTaskId: null,
   pulses: [],
@@ -85,6 +89,22 @@ export const useStore = create<AppState>((set) => ({
             ...state.pulses.slice(-30),
             { id: pulseSeq++, kind: lifecycle.kind, taskId: lifecycle.taskId, at: Date.now() },
           ];
+        }
+        // Track spawned/merged subagents as persistent satellite nodes.
+        if (
+          (lifecycle.kind === "subagent.spawned" || lifecycle.kind === "subagent.merged") &&
+          lifecycle.goalId
+        ) {
+          const title = (lifecycle.data.title as string) ?? lifecycle.taskId ?? lifecycle.summary;
+          const existing = state.subagentsByGoal[lifecycle.goalId] ?? [];
+          const state2: "running" | "merged" = lifecycle.kind === "subagent.merged"
+            ? "merged"
+            : "running";
+          const found = existing.find((s) => s.title === title);
+          const updated = found
+            ? existing.map((s) => (s.title === title ? { ...s, state: state2 } : s))
+            : [...existing, { title, state: state2 }];
+          next.subagentsByGoal = { ...state.subagentsByGoal, [lifecycle.goalId]: updated };
         }
       }
       return next;
