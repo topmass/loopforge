@@ -330,8 +330,26 @@ function EmptyState() {
 // An open goal with no plan yet: its loop is not running. Offer to start it so
 // the owning agent plans and works live - like kicking off a Codex goal.
 function IdlePlan({ goalId }: { goalId: string }) {
+  const loopActiveAt = useStore((s) => s.loopActiveAt[goalId]);
+  const working = loopActiveAt !== undefined && Date.now() - loopActiveAt < 120_000;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+
+  if (working) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-400">
+        <div className="flex items-center gap-2 text-lg">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-orange-400" />
+          {goalId}: agent is working
+        </div>
+        <div className="max-w-md text-sm text-slate-500">
+          The owning agent is planning and acting now. Its plan appears here at the end of the
+          current turn. Add a task below any time to steer it.
+        </div>
+      </div>
+    );
+  }
+
   const start = async () => {
     setBusy(true);
     setNote(null);

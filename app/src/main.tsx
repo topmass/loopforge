@@ -3,11 +3,18 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App";
 import { api, subscribe } from "./api";
+import { maybeStartTauriServer } from "./tauri";
 import { useStore } from "./store";
 
-// Bootstrap: seed runtime + the lifecycle backlog, then stay live over SSE.
+// Bootstrap: in the native app, spawn the server first; then seed runtime + the
+// lifecycle backlog, and stay live over SSE.
 async function bootstrap() {
   const store = useStore.getState();
+  try {
+    await maybeStartTauriServer();
+  } catch {
+    // Native server spawn is best-effort; the browser path skips it entirely.
+  }
   try {
     store.setRuntime(await api.runtime());
   } catch {

@@ -28,6 +28,9 @@ interface AppState {
   subagentsByGoal: Record<string, { title: string; state: "running" | "merged" }[]>;
   activeGoalId: string | null;
   selectedTaskId: string | null;
+  // Last time a goal's loop emitted activity, so the UI can show "working"
+  // before the first plan.updated lands (a long first turn looks idle otherwise).
+  loopActiveAt: Record<string, number>;
   // Transient pulse events for the planet view to animate, keyed by an id.
   pulses: { id: number; kind: string; taskId: string | null; at: number }[];
 
@@ -51,6 +54,7 @@ export const useStore = create<AppState>((set) => ({
   subagentsByGoal: {},
   activeGoalId: null,
   selectedTaskId: null,
+  loopActiveAt: {},
   pulses: [],
 
   setConn: (conn) => set({ conn }),
@@ -70,6 +74,12 @@ export const useStore = create<AppState>((set) => ({
       const next: Partial<AppState> = {
         activity: [...state.activity.slice(-400), event],
       };
+      // Stamp loop liveness so the UI can show "working" before plan.updated.
+      // Loop activity events prefix their message with the goal id.
+      const goalRef = lifecycle?.goalId ?? event.message.match(/^(GOAL-\d+)/)?.[1] ?? null;
+      if (goalRef && (event.role === "loop" || event.role === "lifecycle")) {
+        next.loopActiveAt = { ...state.loopActiveAt, [goalRef]: Date.now() };
+      }
       if (lifecycle) {
         next.lifecycle = [...state.lifecycle.slice(-400), lifecycle];
         // plan.updated carries the authoritative step list for its goal.

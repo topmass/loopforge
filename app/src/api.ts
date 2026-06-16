@@ -6,8 +6,19 @@ import type { ActivityEvent, BoardSnapshot, LifecycleEvent, Runtime } from "./ty
 
 const LIFECYCLE_ROLE = "lifecycle";
 
+// In the browser the GUI is served by the LoopForge server, so API paths are
+// relative. In the Tauri native window there is no origin server, so the Rust
+// shell spawns one and we point at it on localhost. setApiBase wires that.
+let API_BASE = "";
+export function setApiBase(base: string): void {
+  API_BASE = base.replace(/\/$/, "");
+}
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     ...init,
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
@@ -97,7 +108,7 @@ export function subscribe(handlers: {
   onOpen: () => void;
   onError: () => void;
 }): () => void {
-  const source = new EventSource("/api/events");
+  const source = new EventSource(apiUrl("/api/events"));
   source.addEventListener("open", handlers.onOpen);
   source.addEventListener("error", handlers.onError);
   source.addEventListener("board", (e) => {
