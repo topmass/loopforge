@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "./store";
 import { api } from "./api";
-import type { PlanStep } from "./types";
+import type { Goal, PlanStep } from "./types";
 import { NodeView } from "./NodeView";
 
 // Shared spring - the soft, slightly bouncy motion of a calm home menu.
@@ -254,6 +254,38 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               api.setScout(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
         />
 
+        <div className="flex items-center justify-between gap-3 border-b border-white/8 py-3">
+          <div>
+            <div className="text-sm font-medium text-slate-200">Parallel sub-agents</div>
+            <div className="text-xs text-slate-500">
+              Max sub-agents the main agent runs at once. It is told to fan out work up to this many.
+            </div>
+          </div>
+          <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1">
+            <button
+              type="button"
+              onClick={() =>
+                void wrap("parallel agents", () =>
+                  api.setMaxAgents(Math.max(1, (runtime?.maxParallelAgents ?? 5) - 1)))}
+              className="h-7 w-7 rounded-lg text-slate-300 transition hover:bg-white/10"
+            >
+              −
+            </button>
+            <span className="w-7 text-center text-sm font-semibold tabular-nums text-orange-300">
+              {runtime?.maxParallelAgents ?? 5}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                void wrap("parallel agents", () =>
+                  api.setMaxAgents(Math.min(12, (runtime?.maxParallelAgents ?? 5) + 1)))}
+              className="h-7 w-7 rounded-lg text-slate-300 transition hover:bg-white/10"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
         <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 border-t border-white/8 pt-3">
           <div>
             <div className="text-sm font-medium text-slate-200">Push sub-agent branches</div>
@@ -368,94 +400,164 @@ function TopBar(
   );
 }
 
+// One space per project: the project (cwd) IS the space - one main agent
+// growing it over time. The current (open) goal is what that agent is building
+// now; closed goals are the project's history. There is no multi-space list.
+function GoalTile(
+  { goal, active, live, onSelect, onRemove }: {
+    goal: Goal;
+    active: boolean;
+    live: boolean;
+    onSelect: () => void;
+    onRemove: () => Promise<void>;
+  },
+) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={spring}
+      whileHover={{ scale: 1.015 }}
+      className={`group relative flex items-center overflow-hidden rounded-2xl border p-0.5 transition-colors ${
+        active
+          ? "border-orange-400/40 bg-orange-400/10 shadow-[0_8px_30px_-12px_rgba(249,115,22,0.5)]"
+          : "border-white/5 bg-white/[0.03] hover:bg-white/[0.06]"
+      }`}
+    >
+      <button type="button" onClick={onSelect} className="min-w-0 flex-1 px-3 py-2.5 text-left">
+        <span className="flex items-center gap-2">
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${
+              goal.status === "open"
+                ? live
+                  ? "animate-pulse bg-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.9)]"
+                  : "bg-orange-400/70 shadow-[0_0_8px_rgba(249,115,22,0.7)]"
+                : "bg-emerald-400"
+            }`}
+          />
+          <span className={`truncate text-sm ${active ? "text-white" : "text-slate-300"}`}>
+            {goal.text}
+          </span>
+        </span>
+        <span className="mt-0.5 block pl-4 text-[11px] text-slate-500">
+          {goal.id} · {goal.status === "open" ? (live ? "working" : "active") : "done"}
+        </span>
+      </button>
+      {confirming
+        ? (
+          <span className="flex shrink-0 items-center gap-1 pr-2 text-xs">
+            <button
+              type="button"
+              onClick={() => void onRemove()}
+              className="rounded-lg bg-red-500/90 px-2 py-0.5 text-white"
+            >
+              delete
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="text-slate-400 hover:text-slate-200"
+            >
+              ✕
+            </button>
+          </span>
+        )
+        : (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            title="Remove goal"
+            className="shrink-0 px-2.5 py-2 text-slate-600 opacity-0 transition hover:text-red-400 group-hover:opacity-100"
+          >
+            ✕
+          </button>
+        )}
+    </motion.div>
+  );
+}
+
 function Sidebar() {
   const board = useStore((s) => s.board);
+  const runtime = useStore((s) => s.runtime);
   const activeGoalId = useStore((s) => s.activeGoalId);
   const setActiveGoal = useStore((s) => s.setActiveGoal);
+  const loopActiveAt = useStore((s) => s.loopActiveAt);
   const goals = board?.goals ?? [];
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const open = goals.filter((g) => g.status === "open");
+  const history = goals.filter((g) => g.status !== "open").reverse();
+  const now = Date.now();
+  const isLive = (id: string) => now - (loopActiveAt[id] ?? 0) < 90_000;
+  const projectName = runtime?.project?.name ?? "project";
+  const projectPath = runtime?.project?.path ?? "";
 
   const remove = async (id: string) => {
     await api.deleteGoal(id);
-    setConfirming(null);
     if (activeGoalId === id) setActiveGoal(null);
   };
 
   return (
     <aside className="glass-soft flex w-64 shrink-0 flex-col border-r border-white/5">
-      <div className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        Spaces
+      {/* The space = this project. One main agent grows it. */}
+      <div className="px-4 pb-1 pt-4">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Project
+        </div>
+        <div className="mt-2 flex items-center gap-2.5 rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-2.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-orange-400/15 text-sm">
+            🛠
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-slate-100">{projectName}</span>
+            <span className="block truncate text-[11px] text-slate-500" title={projectPath}>
+              {projectPath || "one main agent"}
+            </span>
+          </span>
+        </div>
       </div>
-      <div className="flex-1 space-y-2 overflow-y-auto px-3 pb-3">
-        {goals.length === 0 && (
-          <div className="px-2 py-2 text-sm text-slate-500">No goal yet. Describe one below.</div>
+
+      <div className="flex-1 space-y-1.5 overflow-y-auto px-3 pb-3 pt-3">
+        <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Current goal
+        </div>
+        {open.length === 0 && (
+          <div className="px-2 py-2 text-sm text-slate-500">
+            No active goal. Describe one below to start the loop.
+          </div>
         )}
-        {goals.map((g, i) => {
-          const active = g.id === activeGoalId;
-          return (
-            <motion.div
+        <AnimatePresence initial={false}>
+          {open.map((g) => (
+            <GoalTile
               key={g.id}
-              initial={{ opacity: 0, y: 10, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ ...spring, delay: Math.min(i * 0.04, 0.3) }}
-              whileHover={{ scale: 1.015 }}
-              className={`group relative flex items-center overflow-hidden rounded-2xl border p-0.5 transition-colors ${
-                active
-                  ? "border-orange-400/40 bg-orange-400/10 shadow-[0_8px_30px_-12px_rgba(249,115,22,0.5)]"
-                  : "border-white/5 bg-white/[0.03] hover:bg-white/[0.06]"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setActiveGoal(g.id)}
-                className="min-w-0 flex-1 px-3 py-2.5 text-left"
-              >
-                <span className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${
-                      g.status === "open" ? "bg-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.8)]" : "bg-emerald-400"
-                    }`}
-                  />
-                  <span className={`truncate text-sm ${active ? "text-white" : "text-slate-300"}`}>
-                    {g.text}
-                  </span>
-                </span>
-                <span className="mt-0.5 block pl-4 text-[11px] text-slate-500">
-                  {g.id} · {g.status}
-                </span>
-              </button>
-              {confirming === g.id
-                ? (
-                  <span className="flex shrink-0 items-center gap-1 pr-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => void remove(g.id)}
-                      className="rounded-lg bg-red-500/90 px-2 py-0.5 text-white"
-                    >
-                      delete
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirming(null)}
-                      className="text-slate-400 hover:text-slate-200"
-                    >
-                      ✕
-                    </button>
-                  </span>
-                )
-                : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirming(g.id)}
-                    title="Remove space"
-                    className="shrink-0 px-2.5 py-2 text-slate-600 opacity-0 transition hover:text-red-400 group-hover:opacity-100"
-                  >
-                    ✕
-                  </button>
-                )}
-            </motion.div>
-          );
-        })}
+              goal={g}
+              active={g.id === activeGoalId}
+              live={isLive(g.id)}
+              onSelect={() => setActiveGoal(g.id)}
+              onRemove={() => remove(g.id)}
+            />
+          ))}
+        </AnimatePresence>
+
+        {history.length > 0 && (
+          <>
+            <div className="px-1 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              History
+            </div>
+            <AnimatePresence initial={false}>
+              {history.map((g) => (
+                <GoalTile
+                  key={g.id}
+                  goal={g}
+                  active={g.id === activeGoalId}
+                  live={false}
+                  onSelect={() => setActiveGoal(g.id)}
+                  onRemove={() => remove(g.id)}
+                />
+              ))}
+            </AnimatePresence>
+          </>
+        )}
       </div>
     </aside>
   );

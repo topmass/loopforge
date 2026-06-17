@@ -42,6 +42,9 @@ export interface GlobalConfig {
   // When true, fan-out sub-agents push their branch to origin on completion
   // (if a remote exists) before the loop merges everything at the end.
   pushBranches: boolean;
+  // Hard cap on how many fan-out sub-agents the goal loop runs in parallel.
+  // The main agent is told to use up to this many disjoint-scope sub-agents.
+  maxParallelAgents: number;
 }
 
 export interface GlobalConfigPatch {
@@ -54,6 +57,7 @@ export interface GlobalConfigPatch {
   scout?: Partial<GlobalConfig["scout"]>;
   search?: Partial<GlobalConfig["search"]>;
   pushBranches?: boolean;
+  maxParallelAgents?: number;
 }
 
 export function loopforgeHome(): string {
@@ -113,6 +117,7 @@ export function defaultGlobalConfig(): GlobalConfig {
       endpoint: "",
     },
     pushBranches: false,
+    maxParallelAgents: 5,
   };
 }
 
@@ -157,11 +162,19 @@ export function readGlobalConfig(): GlobalConfig {
         : defaults.search.endpoint,
     },
     pushBranches: parsed.pushBranches === true,
+    maxParallelAgents: intValue(parsed.maxParallelAgents, defaults.maxParallelAgents),
   };
 }
 
 function intValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+// The parallel-agent cap is a small bounded range: at least 1, capped at 12 so
+// a typo can't spawn an unbounded fleet of worktrees.
+function clampAgents(value: number): number {
+  if (!Number.isFinite(value)) return 5;
+  return Math.max(1, Math.min(12, Math.round(value)));
 }
 
 export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
@@ -176,6 +189,7 @@ export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
     scout: { ...current.scout, ...patch.scout },
     search: { ...current.search, ...patch.search },
     pushBranches: patch.pushBranches ?? current.pushBranches,
+    maxParallelAgents: clampAgents(patch.maxParallelAgents ?? current.maxParallelAgents),
   };
   Deno.mkdirSync(loopforgeHome(), { recursive: true });
   Deno.writeTextFileSync(globalConfigPath(), `${JSON.stringify(next, null, 2)}\n`);

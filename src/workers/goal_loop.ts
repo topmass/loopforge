@@ -24,7 +24,6 @@ import {
   runCommand,
 } from "./git_utils.ts";
 import { probeLights, runGoalProbes } from "./goal_probes.ts";
-import { readWorkflow } from "../workflow/workflow.ts";
 import {
   FanoutRunner,
   findScopeConflict,
@@ -243,12 +242,13 @@ export class GoalLoopRunner {
               "with disjoint write scopes, or do the work inline.";
             continue;
           }
+          const cfg = readGlobalConfig();
           const runner = new FanoutRunner(this.root, this.store, {
             createCodexClient: this.createCodexClient,
             onEvent: (event) => this.emit(event),
-            maxConcurrency: readWorkflow(this.root).maxConcurrentAgents,
+            maxConcurrency: cfg.maxParallelAgents,
             projectInstructions,
-            pushBranches: readGlobalConfig().pushBranches,
+            pushBranches: cfg.pushBranches,
           });
           const fanoutResult = await runner.run(
             goalId,
@@ -455,7 +455,7 @@ ${probes.length ? probes.map((probe) => `- ${probe.label}: ${probe.command}`).jo
 Project context from the original folder:
 ${projectInstructions}
 
-${loopPlanContract()}
+${loopPlanContract(readGlobalConfig().maxParallelAgents)}
 
 Begin now: create ${LOOP_PLAN_FILE}, then start the first item.`;
   }

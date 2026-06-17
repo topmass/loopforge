@@ -226,6 +226,7 @@ export function startServer(
           const board = store.getBoard();
           return json({
             queueRunning,
+            project: { name: path.basename(normalizedRoot) || "project", path: normalizedRoot },
             config: readConfig(normalizedRoot),
             backend: describeBackend(readGlobalConfig()),
             backendRaw: readGlobalConfig().backend,
@@ -234,6 +235,7 @@ export function startServer(
             scout: readGlobalConfig().scout,
             search: readGlobalConfig().search,
             pushBranches: readGlobalConfig().pushBranches,
+            maxParallelAgents: readGlobalConfig().maxParallelAgents,
             workflow: readWorkflow(normalizedRoot),
             projectState: board.projectState,
             runningRuns: board.runs.filter((run) => run.status === "running"),
@@ -345,6 +347,22 @@ export function startServer(
             ),
           );
           return json({ pushBranches: updated.pushBranches });
+        }
+
+        // Set the parallel sub-agent cap (clamped 1-12 in updateGlobalConfig).
+        if (url.pathname === "/api/maxagents" && request.method === "PATCH") {
+          const body = await readJson<{ value?: number }>(request);
+          const updated = updateGlobalConfig({ maxParallelAgents: Number(body.value) });
+          broadcastActivity(
+            store.appendEvent(
+              null,
+              null,
+              "system",
+              "config",
+              `Max parallel sub-agents set to ${updated.maxParallelAgents}.`,
+            ),
+          );
+          return json({ maxParallelAgents: updated.maxParallelAgents });
         }
 
         // Change the main agent backend (the model the loop owner + workers run

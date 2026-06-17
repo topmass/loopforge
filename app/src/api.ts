@@ -82,6 +82,11 @@ export const api = {
     jsonFetch<unknown>("/api/scout", { method: "PATCH", body: JSON.stringify(patch) }),
   setPushBranches: (enabled: boolean) =>
     jsonFetch<unknown>("/api/pushbranches", { method: "PATCH", body: JSON.stringify({ enabled }) }),
+  setMaxAgents: (value: number) =>
+    jsonFetch<{ maxParallelAgents: number }>("/api/maxagents", {
+      method: "PATCH",
+      body: JSON.stringify({ value }),
+    }),
 };
 
 // Reconstruct a typed LifecycleEvent from a stored ActivityEvent (role=lifecycle,

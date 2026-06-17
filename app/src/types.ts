@@ -73,10 +73,12 @@ export interface BoardSnapshot {
 }
 
 export interface Runtime {
+  project?: { name: string; path: string };
   backend?: string;
   backendRaw?: string;
   rescue?: { enabled: boolean; backend: string; afterAttempts: number };
   planner?: { enabled: boolean; backend: string };
   scout?: { enabled: boolean; backend: string };
   pushBranches?: boolean;
+  maxParallelAgents?: number;
 }

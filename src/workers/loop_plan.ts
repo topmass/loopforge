@@ -62,7 +62,7 @@ export function signalsComplete(responseText: string): boolean {
   return new RegExp(`^${LOOP_COMPLETE_TOKEN}\\b`, "m").test(responseText.trim());
 }
 
-export function loopPlanContract(): string {
+export function loopPlanContract(maxParallel = 5): string {
   return `Plan contract:
 - Maintain ${LOOP_PLAN_FILE} at the worktree root: a markdown checklist where each line is
   "- [ ] item" (todo), "- [~] item" (in progress), or "- [x] item -- one-line evidence" (done).
@@ -73,12 +73,15 @@ export function loopPlanContract(): string {
 - Record decisions, discoveries, and anything the next iteration must know directly in
   ${LOOP_PLAN_FILE} under the relevant item. This file and the repo are your memory.
 - Do not create commits; LoopForge commits the worktree after every turn.
-- To parallelize independent work, you may delegate to sub-agents. Only do this when the pieces
-  have DISJOINT write scopes (no shared files). End your reply with:
+- PREFER PARALLELISM. When the plan has independent pieces with DISJOINT write scopes (no shared
+  files), split them across sub-agents that run AT THE SAME TIME rather than doing them one by one.
+  Use as many sub-agents as the work naturally divides into, up to ${maxParallel} concurrent ones.
+  End your reply with:
   ${LOOP_FANOUT_TOKEN}
   {"subtasks":[{"title":"...","instruction":"...","writeScope":["src/api/**"]}, ...]}
-  LoopForge runs each in its own worktree in parallel, enforces the scopes, merges the results
-  back, and reports a summary on your next turn. Do the work inline instead when scopes overlap.
+  Each sub-agent gets its own isolated worktree; LoopForge enforces the scopes, runs them in
+  parallel, merges the results back, and reports a summary on your next turn. Do the work inline
+  only when the pieces would touch the same files.
 - When every item is checked and you believe the win conditions pass, end your reply with the
   single line ${LOOP_COMPLETE_TOKEN}.
 - Only when truly blocked by an absolute blocker (credentials, third-party access, destructive
