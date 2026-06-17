@@ -27,6 +27,7 @@ export function App() {
         onSettings={() => setSettingsOpen(true)}
       />
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      <StatusStrip onSettings={() => setSettingsOpen(true)} />
       <AlertsBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
@@ -96,6 +97,43 @@ function AlertsBar() {
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+// A live strip showing which model fills each role and what the loop is doing
+// right now - so "how is it working" is always answerable at a glance.
+function StatusStrip({ onSettings }: { onSettings: () => void }) {
+  const runtime = useStore((s) => s.runtime);
+  const activity = useStore((s) => s.activity);
+  if (!runtime) return null;
+  const role = (label: string, value: string, on = true) => (
+    <button
+      type="button"
+      onClick={onSettings}
+      className="flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/60 px-2.5 py-0.5 text-xs hover:border-slate-600"
+      title="Open model settings"
+    >
+      <span className="text-slate-500">{label}</span>
+      <span className={on ? "text-slate-200" : "text-slate-600"}>{value}</span>
+    </button>
+  );
+  // The most recent loop/agent line is "what it's doing now".
+  const now = [...activity].reverse().find((e) =>
+    e.role === "loop" || e.role === "codex" || e.role === "lifecycle"
+  );
+  return (
+    <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-950/40 px-4 py-1.5">
+      {role("main", runtime.backendRaw ?? "?")}
+      {role("rescue", runtime.rescue?.enabled ? runtime.rescue.backend : "off", !!runtime.rescue?.enabled)}
+      {role("planner", runtime.planner?.enabled ? runtime.planner.backend : "off", !!runtime.planner?.enabled)}
+      {role("scout", runtime.scout?.enabled ? runtime.scout.backend : "off", !!runtime.scout?.enabled)}
+      {now && (
+        <span className="ml-2 flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-orange-400" />
+          <span className="truncate">{now.message.slice(0, 90)}</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -502,29 +540,90 @@ function IdlePlan({ goalId }: { goalId: string }) {
   );
 }
 
+// Clicking a task or sub-agent shows what it is + everything the looping agent
+// recorded about it: its status, the evidence/notes the agent wrote, and (for a
+// sub-agent) its branch and merge state, plus a timeline of related events.
 function DetailPanel() {
   const selectedTaskId = useStore((s) => s.selectedTaskId);
-  const activity = useStore((s) => s.activity);
+  const activeGoalId = useStore((s) => s.activeGoalId);
+  const steps = useStore((s) => (activeGoalId ? s.planByGoal[activeGoalId] : undefined)) ?? [];
+  const subagents = useStore((s) => (activeGoalId ? s.subagentsByGoal[activeGoalId] : undefined)) ?? [];
+  const lifecycle = useStore((s) => s.lifecycle);
   const selectTask = useStore((s) => s.selectTask);
   if (!selectedTaskId) return null;
-  const related = activity.filter((e) => e.taskId === selectedTaskId).slice(-30);
+
+  const step = steps.find((s) => s.title === selectedTaskId);
+  const sub = subagents.find((s) => s.title === selectedTaskId);
+  const isSub = Boolean(sub);
+  const related = lifecycle
+    .filter((e) => e.taskId === selectedTaskId || e.data?.title === selectedTaskId)
+    .slice(-20);
+
+  const statusLabel = sub
+    ? sub.state === "merged" ? "merged" : "running"
+    : step?.status ?? "unknown";
+  const statusColor = statusLabel === "done" || statusLabel === "merged"
+    ? "bg-emerald-500/15 text-emerald-300"
+    : statusLabel === "doing" || statusLabel === "running"
+    ? "bg-orange-500/15 text-orange-300"
+    : "bg-slate-600/20 text-slate-300";
+
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-slate-800 bg-slate-900/40">
-      <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
-        <span className="truncate text-sm font-semibold">{selectedTaskId}</span>
+    <aside className="flex w-96 shrink-0 flex-col border-l border-slate-800 bg-slate-900/50">
+      <div className="flex items-start justify-between gap-2 border-b border-slate-800 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            {isSub ? "Sub-agent" : "Task"}
+          </div>
+          <div className="truncate text-sm font-semibold text-slate-100">{selectedTaskId}</div>
+        </div>
         <button type="button" onClick={() => selectTask(null)} className="text-slate-500 hover:text-slate-200">
           ✕
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 text-xs text-slate-400">
-        {related.length === 0
-          ? <div className="text-slate-600">No activity recorded for this item yet.</div>
-          : related.map((e) => (
-            <div key={e.id} className="mb-2 border-b border-slate-800/50 pb-2">
-              <span className="text-slate-500">{e.role}/{e.kind}</span>
-              <div className="text-slate-300">{e.message.slice(0, 240)}</div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor}`}>
+          {statusLabel}
+        </span>
+
+        {step?.note && (
+          <div className="mt-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              What the agent recorded
             </div>
-          ))}
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-300">{step.note}</p>
+          </div>
+        )}
+
+        {isSub && (
+          <div className="mt-3 rounded-md border border-violet-500/30 bg-violet-500/5 p-2 text-xs text-violet-200">
+            Runs in its own worktree/branch, then merges back into the goal branch.
+            {sub!.state === "merged" ? " Merged ✓" : " Working now…"}
+          </div>
+        )}
+
+        {!step?.note && !isSub && (
+          <p className="mt-3 text-sm text-slate-500">
+            No notes yet - the agent fills this in as it works this item.
+          </p>
+        )}
+
+        {related.length > 0 && (
+          <div className="mt-4">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Timeline
+            </div>
+            <div className="mt-1">
+              {related.map((e, i) => (
+                <div key={i} className="border-b border-slate-800/50 py-1.5 text-xs">
+                  <span className="text-slate-500">{e.kind}</span>
+                  <div className="text-slate-300">{e.summary.slice(0, 200)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );
