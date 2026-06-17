@@ -457,7 +457,10 @@ ${projectInstructions}
 
 ${loopPlanContract(readGlobalConfig().maxParallelAgents)}
 
-Begin now: create ${LOOP_PLAN_FILE}, then start the first item.`;
+Begin now: create ${LOOP_PLAN_FILE}. Then look at your plan - if it has 2+ items that touch
+different files or areas, immediately fan them out to parallel sub-agents (${LOOP_FANOUT_TOKEN})
+this turn rather than building them yourself. Only build inline when there is a single piece or the
+pieces share files.`;
   }
 
   private buildContinuationPrompt(

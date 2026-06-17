@@ -73,15 +73,17 @@ export function loopPlanContract(maxParallel = 5): string {
 - Record decisions, discoveries, and anything the next iteration must know directly in
   ${LOOP_PLAN_FILE} under the relevant item. This file and the repo are your memory.
 - Do not create commits; LoopForge commits the worktree after every turn.
-- PREFER PARALLELISM. When the plan has independent pieces with DISJOINT write scopes (no shared
-  files), split them across sub-agents that run AT THE SAME TIME rather than doing them one by one.
-  Use as many sub-agents as the work naturally divides into, up to ${maxParallel} concurrent ones.
-  End your reply with:
+- DEFAULT TO FAN-OUT. As soon as your plan has 2+ items that touch DIFFERENT files or areas
+  (disjoint write scopes, no shared files), your FIRST action is to delegate them to parallel
+  sub-agents - do NOT build independent pieces yourself one item per turn. Building things that
+  could run in parallel inline is the wrong default and wastes the loop. Spin up one sub-agent per
+  independent piece, up to ${maxParallel} at once, by ending your reply with:
   ${LOOP_FANOUT_TOKEN}
   {"subtasks":[{"title":"...","instruction":"...","writeScope":["src/api/**"]}, ...]}
-  Each sub-agent gets its own isolated worktree; LoopForge enforces the scopes, runs them in
-  parallel, merges the results back, and reports a summary on your next turn. Do the work inline
-  only when the pieces would touch the same files.
+  Give each sub-agent a precise instruction and an exclusive writeScope. LoopForge runs them in
+  parallel in isolated worktrees, enforces the scopes, merges the results back, and reports a
+  summary on your next turn. Keep work inline ONLY when the remaining pieces genuinely share the
+  same files (a true conflict) or there is just one piece left.
 - When every item is checked and you believe the win conditions pass, end your reply with the
   single line ${LOOP_COMPLETE_TOKEN}.
 - Only when truly blocked by an absolute blocker (credentials, third-party access, destructive

@@ -41,8 +41,8 @@ Deno.test("updateGlobalConfig clamps the parallel-agent cap to 1-12 and persists
   });
 });
 
-Deno.test("loopPlanContract tells the agent the parallel cap and prefers fan-out", () => {
+Deno.test("loopPlanContract tells the agent the parallel cap and defaults to fan-out", () => {
   const contract = loopPlanContract(5);
-  assertStringIncludes(contract, "up to 5 concurrent");
-  assert(/PREFER PARALLELISM/i.test(contract));
+  assertStringIncludes(contract, "up to 5 at once");
+  assert(/DEFAULT TO FAN-OUT/i.test(contract));
 });

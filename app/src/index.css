@@ -1,9 +1,20 @@
 @import "tailwindcss";
 
+/* Light editorial theme (Hermes-inspired): warm off-white canvas, white cards
+   with soft shadows, calm muted accents, generous whitespace. Helpful
+   automation, controlled truth - a professional, trustworthy SaaS feel. */
 :root {
-  color-scheme: dark;
-  --bg: #07090e;
-  --ink: #eef2f8;
+  color-scheme: light;
+  --bg: #f4f4f1;        /* warm off-white canvas */
+  --ink: #1b2330;       /* near-black slate, primary text */
+  --muted: #6b7280;     /* secondary text */
+  --faint: #9aa1ac;     /* labels / tertiary */
+  --card: #ffffff;
+  --line: #e8e7e2;      /* hairline borders */
+  --accent: #c2570e;    /* muted terracotta - brand / active, used sparingly */
+  --accent-soft: #fdf0e6;
+  --done: #0f766e;      /* deep teal - completed/merged */
+  --done-soft: #ecf6f4;
 }
 
 html, body, #root { height: 100%; margin: 0; }
@@ -18,43 +29,64 @@ body {
   overflow: hidden;
 }
 
-/* A soft, slowly drifting aurora behind everything - the ethereal backdrop.
-   Pure CSS so it costs nothing and never blocks the UI. */
+/* A very faint warm wash in the corners - editorial calm, not a light show. */
 #root::before {
   content: "";
   position: fixed;
-  inset: -25%;
+  inset: 0;
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(40% 50% at 20% 18%, rgba(249, 115, 22, 0.18), transparent 70%),
-    radial-gradient(45% 55% at 82% 22%, rgba(56, 189, 248, 0.16), transparent 70%),
-    radial-gradient(50% 55% at 60% 88%, rgba(167, 139, 250, 0.16), transparent 70%);
-  filter: blur(40px) saturate(1.1);
-  animation: drift 28s ease-in-out infinite alternate;
+    radial-gradient(55% 45% at 8% 0%, rgba(194, 87, 14, 0.05), transparent 60%),
+    radial-gradient(50% 50% at 100% 100%, rgba(15, 118, 110, 0.04), transparent 60%);
 }
-
-@keyframes drift {
-  0%   { transform: translate3d(-3%, -2%, 0) scale(1); }
-  50%  { transform: translate3d(2%, 3%, 0) scale(1.08); }
-  100% { transform: translate3d(3%, -3%, 0) scale(1.04); }
-}
-
 #root > * { position: relative; z-index: 1; }
 
-/* Frosted-glass surface - soft translucency + depth, the Ive material. */
+/* White card with a soft editorial shadow. */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 14px 30px -20px rgba(16, 24, 40, 0.28);
+}
+
+/* Flat translucent surface for chrome (bars, sidebar) over the canvas. */
+.surface {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+
+/* Outlined uppercase status chip - the Hermes pill. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Back-compat: existing components use .glass/.glass-soft; render them as light
+   frosted surfaces so the whole app reads as one coherent light theme. */
 .glass {
-  background: rgba(17, 22, 32, 0.55);
-  backdrop-filter: blur(18px) saturate(1.3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  border: 1px solid var(--line);
 }
 .glass-soft {
-  background: rgba(20, 26, 38, 0.4);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
 }
 
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.2); border-radius: 8px; }
+*::-webkit-scrollbar-thumb { background: rgba(16, 24, 40, 0.14); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(16, 24, 40, 0.22); }
 *::-webkit-scrollbar-track { background: transparent; }
