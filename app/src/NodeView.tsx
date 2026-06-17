@@ -1,11 +1,13 @@
-// The planet/node view: the goal-loop owner is the core; each plan step is a
-// node orbiting it; subagents and activity pulse along the wires. This is one
-// projection of the same store the Kanban reads - the nodes ARE the plan steps.
-// react-three-fiber for the canvas only; everything else stays DOM.
+// The command center: a cinematic 3D view of the goal as a living system. The
+// goal-loop owner is the glowing core; each plan step orbits it; sub-agents are
+// satellites that come ALIVE while they work - breathing light, and a constant
+// two-way stream of data particles flowing along the wires between each live
+// agent and the core (telemetry home, instructions out). One projection of the
+// same store the Kanban reads; the nodes ARE the plan steps.
 
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Line, OrbitControls, Text } from "@react-three/drei";
+import { Line, OrbitControls, Stars, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { useStore } from "./store";
 import type { PlanStep } from "./types";
@@ -23,13 +25,101 @@ function nodePosition(index: number, total: number): [number, number, number] {
   return [Math.cos(angle) * RADIUS, Math.sin(angle) * RADIUS, 0];
 }
 
+// One soft radial-gradient texture, shared by every glow sprite. Built once on
+// the client; gives us additive "bloom" without a postprocessing pass.
+function useGlowTexture(): THREE.Texture {
+  return useMemo(() => {
+    const size = 128;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.25, "rgba(255,255,255,0.55)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }, []);
+}
+
+function Glow({ color, scale, opacity = 0.85 }: { color: string; scale: number; opacity?: number }) {
+  const tex = useGlowTexture();
+  return (
+    <sprite scale={[scale, scale, scale]}>
+      <spriteMaterial
+        map={tex}
+        color={color}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        transparent
+        opacity={opacity}
+      />
+    </sprite>
+  );
+}
+
+// A continuous two-way stream of light particles along a wire: telemetry flows
+// in (node -> core), instructions flow out (core -> node). This is what makes a
+// live agent read as "talking to" the main agent between discrete events.
+function DataStream(
+  { from, to, color, active, count = 5 }: {
+    from: THREE.Vector3;
+    to: THREE.Vector3;
+    color: string;
+    active: boolean;
+    count?: number;
+  },
+) {
+  const group = useRef<THREE.Group>(null);
+  const seed = useMemo(() => Math.abs(from.x * 7.13 + from.y * 3.7) % 1, [from]);
+  useFrame((state) => {
+    if (!group.current) return;
+    const t = state.clock.elapsedTime;
+    const kids = group.current.children as THREE.Mesh[];
+    for (let i = 0; i < kids.length; i++) {
+      const inbound = i < count; // first set: node -> core (telemetry home)
+      const idx = i % count;
+      const phase = (t * 0.55 + idx / count + seed) % 1;
+      const a = inbound ? from : to;
+      const b = inbound ? to : from;
+      kids[i].position.lerpVectors(a, b, phase);
+      const mat = kids[i].material as THREE.MeshBasicMaterial;
+      kids[i].visible = active;
+      // Fade in and out at the endpoints so particles bloom mid-flight.
+      mat.opacity = active ? Math.sin(phase * Math.PI) * 0.9 : 0;
+    }
+  });
+  return (
+    <group ref={group}>
+      {Array.from({ length: count * 2 }).map((_, i) => (
+        <mesh key={i} visible={false}>
+          <sphereGeometry args={[0.07, 8, 8]} />
+          <meshBasicMaterial
+            color={i < count ? color : "#7dd3fc"}
+            blending={THREE.AdditiveBlending}
+            transparent
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function Core({ passed, total }: { passed: number; total: number }) {
   const mesh = useRef<THREE.Mesh>(null);
+  const shell = useRef<THREE.Mesh>(null);
   useFrame((state) => {
+    const t = state.clock.elapsedTime;
     if (mesh.current) {
-      const t = state.clock.elapsedTime;
-      const s = 1 + Math.sin(t * 1.5) * 0.04;
-      mesh.current.scale.setScalar(s);
+      mesh.current.scale.setScalar(1 + Math.sin(t * 1.5) * 0.04);
+    }
+    if (shell.current) {
+      shell.current.rotation.y = t * 0.25;
+      shell.current.rotation.x = t * 0.12;
     }
   });
   // Probe health ring: green arc proportional to passing win conditions.
@@ -39,26 +129,34 @@ function Core({ passed, total }: { passed: number; total: number }) {
     const segments = 64;
     for (let i = 0; i <= segments; i++) {
       const a = (i / segments) * Math.PI * 2 * frac - Math.PI / 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * 1.5, Math.sin(a) * 1.5, 0));
+      pts.push(new THREE.Vector3(Math.cos(a) * 1.6, Math.sin(a) * 1.6, 0));
     }
     return pts;
   }, [passed, total]);
   return (
     <group>
+      <Glow color="#fb923c" scale={6.5} opacity={0.5} />
+      <Glow color="#f97316" scale={3.6} opacity={0.7} />
       <mesh ref={mesh}>
-        <sphereGeometry args={[1, 32, 32]} />
+        <sphereGeometry args={[1, 48, 48]} />
         <meshStandardMaterial
           color="#fb923c"
           emissive="#f97316"
-          emissiveIntensity={0.6}
-          roughness={0.4}
+          emissiveIntensity={0.7}
+          roughness={0.35}
+          metalness={0.1}
         />
+      </mesh>
+      {/* Slowly rotating wireframe corona - the core "thinking". */}
+      <mesh ref={shell}>
+        <icosahedronGeometry args={[1.32, 1]} />
+        <meshBasicMaterial color="#fdba74" wireframe transparent opacity={0.18} />
       </mesh>
       {total > 0 && ringPoints.length > 1 && (
         <Line points={ringPoints} color="#34d399" lineWidth={3} />
       )}
-      <Text position={[0, -1.9, 0]} fontSize={0.32} color="#cbd5e1" anchorX="center">
-        {total > 0 ? `${passed}/${total} win conditions` : "core"}
+      <Text position={[0, -2.05, 0]} fontSize={0.32} color="#cbd5e1" anchorX="center">
+        {total > 0 ? `${passed}/${total} win conditions` : "main agent"}
       </Text>
     </group>
   );
@@ -73,17 +171,22 @@ function Node(
   },
 ) {
   const mesh = useRef<THREE.Mesh>(null);
+  const doing = step.status === "doing";
   useFrame((state) => {
-    if (mesh.current && step.status === "doing") {
-      const t = state.clock.elapsedTime;
+    if (mesh.current && doing) {
       const mat = mesh.current.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.5 + Math.sin(t * 4) * 0.4;
+      mat.emissiveIntensity = 0.5 + Math.sin(state.clock.elapsedTime * 4) * 0.4;
     }
   });
   const color = STATUS_COLOR[step.status] ?? "#475569";
   return (
     <group position={position}>
-      <Line points={[[0, 0, 0], [-position[0], -position[1], 0]]} color="#1e293b" lineWidth={1} />
+      <Line
+        points={[[0, 0, 0], [-position[0], -position[1], 0]]}
+        color={doing ? "#7c3a12" : "#1e293b"}
+        lineWidth={1}
+      />
+      {(doing || selected) && <Glow color={color} scale={1.6} opacity={0.6} />}
       <mesh
         ref={mesh}
         onClick={(e) => {
@@ -95,7 +198,7 @@ function Node(
         <meshStandardMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={step.status === "doing" ? 0.8 : step.status === "done" ? 0.4 : 0.15}
+          emissiveIntensity={doing ? 0.8 : step.status === "done" ? 0.4 : 0.15}
           roughness={0.5}
         />
       </mesh>
@@ -120,6 +223,9 @@ interface Travel {
   color: string;
 }
 
+// Discrete event bursts (spawn / progress / merged / verified / blocked): a
+// bright single packet that fires on the actual lifecycle event, layered over
+// the ambient DataStreams.
 function Pulses({ steps }: { steps: PlanStep[] }) {
   const pulses = useStore((s) => s.pulses);
   const travels = useRef<Travel[]>([]);
@@ -130,7 +236,6 @@ function Pulses({ steps }: { steps: PlanStep[] }) {
     for (const p of pulses) {
       if (p.id <= seen.current) continue;
       seen.current = p.id;
-      // Match the pulse to a node by task title if possible, else the core halo.
       const idx = p.taskId ? steps.findIndex((s) => s.title === p.taskId) : -1;
       const target = idx >= 0
         ? new THREE.Vector3(...nodePosition(idx, steps.length))
@@ -141,7 +246,6 @@ function Pulses({ steps }: { steps: PlanStep[] }) {
         : p.kind === "verified"
         ? "#34d399"
         : "#38bdf8";
-      // progress/merged travel node->core; spawned travels core->node.
       const inbound = p.kind !== "subagent.spawned";
       travels.current.push({
         id: p.id,
@@ -175,15 +279,21 @@ function Pulses({ steps }: { steps: PlanStep[] }) {
     <group ref={group}>
       {Array.from({ length: 16 }).map((_, i) => (
         <mesh key={i} visible={false}>
-          <sphereGeometry args={[0.16, 12, 12]} />
-          <meshBasicMaterial color="#38bdf8" />
+          <sphereGeometry args={[0.18, 12, 12]} />
+          <meshBasicMaterial
+            color="#38bdf8"
+            blending={THREE.AdditiveBlending}
+            transparent
+            depthWrite={false}
+          />
         </mesh>
       ))}
     </group>
   );
 }
 
-// Sub-agents orbit on an outer ring as labeled satellites of the core.
+// Sub-agents orbit on an outer ring as labeled satellites. Running ones breathe
+// light, spin, and keep a live DataStream to the core; merged ones go calm.
 function Subagent(
   { title, state, position }: {
     title: string;
@@ -192,22 +302,42 @@ function Subagent(
   },
 ) {
   const mesh = useRef<THREE.Mesh>(null);
+  const running = state === "running";
   useFrame((s) => {
-    if (mesh.current && state === "running") {
+    if (!mesh.current) return;
+    const t = s.clock.elapsedTime;
+    mesh.current.rotation.y = t * (running ? 1.4 : 0.3);
+    mesh.current.rotation.x = t * 0.5;
+    if (running) {
       const mat = mesh.current.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.4 + Math.sin(s.clock.elapsedTime * 5) * 0.35;
+      mat.emissiveIntensity = 0.5 + Math.sin(t * 5) * 0.4;
+      mesh.current.scale.setScalar(1 + Math.sin(t * 3) * 0.08);
     }
   });
-  const color = state === "merged" ? "#38bdf8" : "#a78bfa";
+  const color = running ? "#a78bfa" : "#38bdf8";
   return (
     <group position={position}>
-      <Line points={[[0, 0, 0], [-position[0], -position[1], 0]]} color="#312e54" lineWidth={1} />
+      <Line
+        points={[[0, 0, 0], [-position[0], -position[1], 0]]}
+        color={running ? "#4c1d95" : "#1e3a5f"}
+        lineWidth={1}
+      />
+      {running && <Glow color="#a78bfa" scale={1.9} opacity={0.7} />}
       <mesh ref={mesh}>
-        <icosahedronGeometry args={[0.32, 0]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.5} roughness={0.4} />
+        <icosahedronGeometry args={[0.34, 0]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={running ? 0.6 : 0.35}
+          roughness={0.4}
+          metalness={0.2}
+        />
       </mesh>
-      <Text position={[0, 0.6, 0]} fontSize={0.22} color="#a5b4fc" anchorX="center" maxWidth={3}>
-        {title.slice(0, 32)}
+      <Text position={[0, 0.62, 0]} fontSize={0.22} color="#c4b5fd" anchorX="center" maxWidth={3}>
+        {title.replace(/^Spawned sub-agent\s*/i, "").slice(0, 32) || "sub-agent"}
+      </Text>
+      <Text position={[0, -0.58, 0]} fontSize={0.16} color={running ? "#a78bfa" : "#64748b"} anchorX="center">
+        {running ? "coding" : "merged"}
       </Text>
     </group>
   );
@@ -221,51 +351,97 @@ export function NodeView({ goalId }: { goalId: string }) {
   const selectTask = useStore((s) => s.selectTask);
   const goalProbes = probes.filter((p) => p.goalId === goalId);
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
-  const subRadius = RADIUS + 2.6;
+  const subRadius = RADIUS + 2.8;
+  const core = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const running = subagents.filter((s) => s.state === "running").length;
+
+  // Pre-compute satellite positions so the wire/stream/satellite agree.
+  const subPositions = subagents.map((_, i): [number, number, number] => {
+    const angle = (i / Math.max(subagents.length, 1)) * Math.PI * 2 - Math.PI / 2 + 0.4;
+    return [Math.cos(angle) * subRadius, Math.sin(angle) * subRadius, 0];
+  });
 
   return (
     <div className="relative min-h-0 flex-1">
       <Canvas
-        camera={{ position: [0, 0, subagents.length ? 18 : 13], fov: 50 }}
+        camera={{ position: [0, 0, subagents.length ? 19 : 14], fov: 50 }}
         onPointerMissed={() => selectTask(null)}
       >
-        <ambientLight intensity={0.6} />
-        <pointLight position={[0, 0, 6]} intensity={1.2} />
-        {/* Scroll to zoom, drag to orbit, right-drag to pan. */}
+        <color attach="background" args={["#07090e"]} />
+        <fog attach="fog" args={["#07090e", 22, 70]} />
+        <ambientLight intensity={0.55} />
+        <pointLight position={[0, 0, 6]} intensity={1.3} color="#fb923c" />
+        <pointLight position={[-10, 6, -8]} intensity={0.5} color="#818cf8" />
+        <Stars radius={90} depth={50} count={1600} factor={3.2} saturation={0} fade speed={0.6} />
+
+        {/* Scroll to zoom, drag to orbit, right-drag to pan; slow cinematic drift. */}
         <OrbitControls
           enablePan
           enableZoom
           enableRotate
+          autoRotate
+          autoRotateSpeed={0.35}
           minDistance={4}
-          maxDistance={40}
+          maxDistance={44}
           makeDefault
         />
+
         <Core passed={passed} total={goalProbes.length} />
-        {steps.map((step, i) => (
-          <Node
-            key={`${i}-${step.title}`}
-            step={step}
-            position={nodePosition(i, steps.length)}
-            selected={selectedTaskId === step.title}
-            onSelect={() => selectTask(step.title)}
-          />
-        ))}
-        {subagents.map((sa, i) => {
-          const angle = (i / Math.max(subagents.length, 1)) * Math.PI * 2 - Math.PI / 2 + 0.4;
+
+        {steps.map((step, i) => {
+          const pos = nodePosition(i, steps.length);
           return (
-            <Subagent
-              key={`sa-${i}-${sa.title}`}
-              title={sa.title}
-              state={sa.state}
-              position={[Math.cos(angle) * subRadius, Math.sin(angle) * subRadius, 0]}
+            <Node
+              key={`${i}-${step.title}`}
+              step={step}
+              position={pos}
+              selected={selectedTaskId === step.title}
+              onSelect={() => selectTask(step.title)}
             />
           );
         })}
+
+        {subagents.map((sa, i) => (
+          <Subagent key={`sa-${i}-${sa.title}`} title={sa.title} state={sa.state} position={subPositions[i]} />
+        ))}
+
+        {/* Ambient bidirectional telemetry for every running sub-agent. */}
+        {subagents.map((sa, i) =>
+          sa.state === "running"
+            ? (
+              <DataStream
+                key={`stream-${i}`}
+                from={new THREE.Vector3(...subPositions[i])}
+                to={core}
+                color="#c4b5fd"
+                active
+              />
+            )
+            : null
+        )}
+        {/* The plan step currently being worked also streams to the core. */}
+        {steps.map((step, i) =>
+          step.status === "doing"
+            ? (
+              <DataStream
+                key={`nstream-${i}`}
+                from={new THREE.Vector3(...nodePosition(i, steps.length))}
+                to={core}
+                color="#fdba74"
+                active
+                count={4}
+              />
+            )
+            : null
+        )}
+
         <Pulses steps={steps} />
       </Canvas>
+
       <div className="pointer-events-none absolute left-3 top-3 text-xs text-slate-500">
         <span className="text-orange-400">●</span> main agent ·{" "}
-        <span className="text-violet-400">◆</span> sub-agents ({subagents.length}) ·{" "}
+        <span className="text-violet-400">◆</span> sub-agents ({subagents.length}
+        {running > 0 ? `, ${running} live` : ""}) ·{" "}
         <span className="text-slate-600">scroll to zoom, drag to orbit</span>
       </div>
     </div>
