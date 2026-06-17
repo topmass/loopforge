@@ -238,6 +238,23 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               api.setScout(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
         />
 
+        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 border-t border-slate-800 pt-3">
+          <div>
+            <div className="text-sm font-medium text-slate-200">Push sub-agent branches</div>
+            <div className="text-xs text-slate-500">
+              When a fan-out sub-agent finishes, push its branch to origin (if any); the loop still
+              merges everything at the end.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={!!runtime?.pushBranches}
+            onChange={(e) =>
+              void wrap("push branches", () => api.setPushBranches(e.target.checked))}
+            className="h-4 w-4 accent-orange-500"
+          />
+        </label>
+
         <div className="mt-4 text-xs text-slate-500">
           Changes apply to new work immediately. codex uses your Codex login; claude uses Anthropic
           usage; local/pi use your configured local model.

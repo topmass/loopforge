@@ -422,6 +422,29 @@ async function writeBaselineExcludes(root: string): Promise<void> {
   }
 }
 
+// True if the repo has an 'origin' remote to push to.
+export async function hasRemote(cwd: string): Promise<boolean> {
+  try {
+    const out = (await runCommand(cwd, ["git", "remote", "get-url", "origin"])).trim();
+    return out.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Push a branch to origin (best effort). Returns whether it was pushed.
+export async function gitPushBranch(cwd: string, branch: string): Promise<boolean> {
+  if (!await hasRemote(cwd)) {
+    return false;
+  }
+  try {
+    await runCommand(cwd, ["git", "push", "-u", "origin", branch]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function isGitRepo(root: string): Promise<boolean> {
   try {
     await runCommand(root, ["git", "rev-parse", "--is-inside-work-tree"]);

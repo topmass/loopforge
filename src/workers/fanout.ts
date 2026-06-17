@@ -8,7 +8,7 @@
 import { ActivityEvent, ActivityEventInput } from "../board/types.ts";
 import { BoardStore } from "../board/store.ts";
 import { CodexClient } from "./codex_app_server.ts";
-import { gitCommitAll, gitMergeBranch, prepareFanoutWorktree } from "./git_utils.ts";
+import { gitCommitAll, gitMergeBranch, gitPushBranch, prepareFanoutWorktree } from "./git_utils.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
 
 export const LOOP_FANOUT_TOKEN = "LOOP_FANOUT";
@@ -111,6 +111,7 @@ export interface FanoutRunnerOptions {
   onEvent?: (event: ActivityEvent) => void;
   maxConcurrency: number;
   projectInstructions: string;
+  pushBranches?: boolean;
 }
 
 export class FanoutRunner {
@@ -167,6 +168,12 @@ export class FanoutRunner {
           await codex.stop().catch(() => {});
         }
         await gitCommitAll(assignment.worktreePath, `${subId} ${sub.title}`);
+        // Optionally push the sub-agent's branch to origin on completion, so
+        // its work is shareable before the final merge.
+        let pushed = false;
+        if (this.options.pushBranches) {
+          pushed = await gitPushBranch(assignment.worktreePath, assignment.branchName);
+        }
         completed.push({
           sub,
           branch: assignment.branchName,
@@ -176,8 +183,10 @@ export class FanoutRunner {
           kind: "subagent.progress",
           goalId,
           taskId: null,
-          summary: `${sub.title}: worktree complete, ready to merge.`,
-          data: { title: sub.title, branch: assignment.branchName },
+          summary: pushed
+            ? `${sub.title}: complete and pushed to ${assignment.branchName}.`
+            : `${sub.title}: worktree complete, ready to merge.`,
+          data: { title: sub.title, branch: assignment.branchName, pushed },
         }));
       } catch (error) {
         result.failed.push({

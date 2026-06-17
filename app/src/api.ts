@@ -80,6 +80,8 @@ export const api = {
     jsonFetch<unknown>("/api/planner", { method: "PATCH", body: JSON.stringify(patch) }),
   setScout: (patch: { enabled?: boolean; backend?: string }) =>
     jsonFetch<unknown>("/api/scout", { method: "PATCH", body: JSON.stringify(patch) }),
+  setPushBranches: (enabled: boolean) =>
+    jsonFetch<unknown>("/api/pushbranches", { method: "PATCH", body: JSON.stringify({ enabled }) }),
 };
 
 // Reconstruct a typed LifecycleEvent from a stored ActivityEvent (role=lifecycle,

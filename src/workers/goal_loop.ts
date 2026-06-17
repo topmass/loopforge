@@ -10,6 +10,7 @@ import path from "node:path";
 import { BoardStore } from "../board/store.ts";
 import { ActivityEvent, ActivityEventInput, Goal } from "../board/types.ts";
 import { autonomyContract, RunMode } from "../board/prompts.ts";
+import { readGlobalConfig } from "../board/global_config.ts";
 import { planUpdated } from "../board/lifecycle.ts";
 import { createAgentClient } from "./agent_backend.ts";
 import { CodexClient, CodexSession } from "./codex_app_server.ts";
@@ -247,6 +248,7 @@ export class GoalLoopRunner {
             onEvent: (event) => this.emit(event),
             maxConcurrency: readWorkflow(this.root).maxConcurrentAgents,
             projectInstructions,
+            pushBranches: readGlobalConfig().pushBranches,
           });
           const fanoutResult = await runner.run(
             goalId,

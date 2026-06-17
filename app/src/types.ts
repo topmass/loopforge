@@ -78,4 +78,5 @@ export interface Runtime {
   rescue?: { enabled: boolean; backend: string; afterAttempts: number };
   planner?: { enabled: boolean; backend: string };
   scout?: { enabled: boolean; backend: string };
+  pushBranches?: boolean;
 }

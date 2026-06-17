@@ -141,3 +141,47 @@ Deno.test("FanoutRunner runs disjoint subtasks in parallel worktrees and merges 
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("FanoutRunner pushes sub-agent branches to origin when enabled", async () => {
+  const root = Deno.makeTempDirSync();
+  const remote = Deno.makeTempDirSync();
+  await git(remote, ["init", "--bare"]);
+  await git(root, ["init", "-b", "main"]);
+  await git(root, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=T",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "seed",
+  ]);
+  await git(root, ["remote", "add", "origin", remote]);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Build it");
+    const runner = new FanoutRunner(root, store, {
+      maxConcurrency: 1,
+      projectInstructions: "none",
+      pushBranches: true,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => new TitleAwareSubClient(onEvent),
+    });
+    const result = await runner.run(goal.id, "main", root, [
+      { title: "api", instruction: "write api.txt", writeScope: ["api.txt"] },
+    ]);
+    assertEquals(result.failed.length, 0, JSON.stringify(result.failed));
+    // The sub-agent's branch landed on the remote.
+    const ls = await new Deno.Command("git", {
+      args: ["ls-remote", "--heads", remote],
+      stdout: "piped",
+    }).output();
+    assertStringIncludes(new TextDecoder().decode(ls.stdout), "loopforge/fanout-");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+    await Deno.remove(remote, { recursive: true });
+  }
+});

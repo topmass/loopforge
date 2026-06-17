@@ -233,6 +233,7 @@ export function startServer(
             planner: readGlobalConfig().planner,
             scout: readGlobalConfig().scout,
             search: readGlobalConfig().search,
+            pushBranches: readGlobalConfig().pushBranches,
             workflow: readWorkflow(normalizedRoot),
             projectState: board.projectState,
             runningRuns: board.runs.filter((run) => run.status === "running"),
@@ -326,6 +327,24 @@ export function startServer(
           await worker.compactMainThread();
           broadcastBoard();
           return json(store.getProjectState());
+        }
+
+        // Toggle the push-sub-agent-branches workflow flag.
+        if (url.pathname === "/api/pushbranches" && request.method === "PATCH") {
+          const body = await readJson<{ enabled?: boolean }>(request);
+          const updated = updateGlobalConfig({ pushBranches: body.enabled === true });
+          broadcastActivity(
+            store.appendEvent(
+              null,
+              null,
+              "system",
+              "config",
+              updated.pushBranches
+                ? "Sub-agents will push their branches to origin on completion."
+                : "Sub-agent branch pushing off (local merge only).",
+            ),
+          );
+          return json({ pushBranches: updated.pushBranches });
         }
 
         // Change the main agent backend (the model the loop owner + workers run

@@ -39,6 +39,9 @@ export interface GlobalConfig {
   search: {
     endpoint: string;
   };
+  // When true, fan-out sub-agents push their branch to origin on completion
+  // (if a remote exists) before the loop merges everything at the end.
+  pushBranches: boolean;
 }
 
 export interface GlobalConfigPatch {
@@ -50,6 +53,7 @@ export interface GlobalConfigPatch {
   planner?: Partial<GlobalConfig["planner"]>;
   scout?: Partial<GlobalConfig["scout"]>;
   search?: Partial<GlobalConfig["search"]>;
+  pushBranches?: boolean;
 }
 
 export function loopforgeHome(): string {
@@ -108,6 +112,7 @@ export function defaultGlobalConfig(): GlobalConfig {
     search: {
       endpoint: "",
     },
+    pushBranches: false,
   };
 }
 
@@ -151,6 +156,7 @@ export function readGlobalConfig(): GlobalConfig {
         ? (record(parsed.search).endpoint as string).trim()
         : defaults.search.endpoint,
     },
+    pushBranches: parsed.pushBranches === true,
   };
 }
 
@@ -169,6 +175,7 @@ export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
     planner: { ...current.planner, ...patch.planner },
     scout: { ...current.scout, ...patch.scout },
     search: { ...current.search, ...patch.search },
+    pushBranches: patch.pushBranches ?? current.pushBranches,
   };
   Deno.mkdirSync(loopforgeHome(), { recursive: true });
   Deno.writeTextFileSync(globalConfigPath(), `${JSON.stringify(next, null, 2)}\n`);
