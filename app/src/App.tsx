@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "./store";
 import { api } from "./api";
 import type { Goal, PlanStep } from "./types";
-import { NodeView } from "./NodeView";
 
 // Shared spring - the soft, slightly bouncy motion of a calm home menu.
 const spring = { type: "spring", stiffness: 320, damping: 30 } as const;
@@ -13,8 +12,6 @@ export function App() {
   const runtime = useStore((s) => s.runtime);
   const board = useStore((s) => s.board);
   const activeGoalId = useStore((s) => s.activeGoalId);
-  const [view, setView] = useState<"kanban" | "node">("kanban");
-
   const [logOpen, setLogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const activeGoal = board?.goals.find((g) => g.id === activeGoalId) ?? null;
@@ -24,8 +21,6 @@ export function App() {
       <TopBar
         conn={conn}
         backend={runtime?.backend}
-        view={view}
-        onView={setView}
         logOpen={logOpen}
         onToggleLog={() => setLogOpen((v) => !v)}
         onSettings={() => setSettingsOpen(true)}
@@ -38,11 +33,7 @@ export function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-h-0 flex-1 flex-col">
-          {!activeGoal
-            ? <EmptyState />
-            : view === "kanban"
-            ? <KanbanView goalId={activeGoal.id} />
-            : <NodeView goalId={activeGoal.id} />}
+          {!activeGoal ? <EmptyState /> : <KanbanView goalId={activeGoal.id} />}
         </main>
         {logOpen ? <ActivityDrawer /> : <DetailPanel />}
       </div>
@@ -343,11 +334,9 @@ function ActivityDrawer() {
 }
 
 function TopBar(
-  { conn, backend, view, onView, logOpen, onToggleLog, onSettings }: {
+  { conn, backend, logOpen, onToggleLog, onSettings }: {
     conn: string;
     backend?: string;
-    view: "kanban" | "node";
-    onView: (v: "kanban" | "node") => void;
     logOpen: boolean;
     onToggleLog: () => void;
     onSettings: () => void;
@@ -377,20 +366,6 @@ function TopBar(
         >
           Activity
         </button>
-        <div className="flex overflow-hidden rounded-md border border-slate-200 text-xs">
-          {(["kanban", "node"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => onView(v)}
-              className={`px-3 py-1 capitalize ${
-                view === v ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
         <span className="flex items-center gap-1.5 text-xs text-slate-500">
           <span className={`h-2 w-2 rounded-full ${dot}`} />
           {conn}
