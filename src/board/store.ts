@@ -13,7 +13,12 @@ import {
   worktreesPath,
 } from "../paths.ts";
 import { PROMPTS } from "./prompts.ts";
-import { LifecycleEvent, lifecycleToActivity, parseLifecycleEvent } from "./lifecycle.ts";
+import {
+  LIFECYCLE_ROLE,
+  LifecycleEvent,
+  lifecycleToActivity,
+  parseLifecycleEvent,
+} from "./lifecycle.ts";
 import { ensureAgentContext, ensureWorkflow } from "../workflow/workflow.ts";
 import { summarizeGoalProgress } from "./goal_progress.ts";
 import {
@@ -1475,9 +1480,15 @@ export class BoardStore {
   // The typed lifecycle feed for a goal (or all goals), newest last, for the
   // Kanban and any external dashboard.
   listLifecycleEvents(goalId?: string, limit = 500): LifecycleEvent[] {
-    // listEvents is already chronological (oldest first); the dashboard replays
-    // the feed in order, so do not reverse again.
-    const events = this.listEvents(limit)
+    // Query lifecycle rows directly. Pulling the last N of ALL events and then
+    // filtering loses lifecycle events behind high-volume agent chatter (a
+    // fan-out emits hundreds of fanout:<title> lines), so the GUI would rehydrate
+    // with missing sub-agents/plan. Filtering in SQL keeps the window accurate.
+    const events = (this.db.prepare(
+      "SELECT * FROM events WHERE role = ? ORDER BY id DESC LIMIT ?",
+    ).all(LIFECYCLE_ROLE, limit) as SqlRow[])
+      .map(eventFromRow)
+      .reverse() // chronological (oldest first); the dashboard replays in order
       .map(parseLifecycleEvent)
       .filter((event): event is LifecycleEvent => event !== null);
     return goalId ? events.filter((event) => event.goalId === goalId) : events;
