@@ -196,6 +196,7 @@ export function startServer(
             queueRunning,
             config: readConfig(normalizedRoot),
             backend: describeBackend(readGlobalConfig()),
+            backendRaw: readGlobalConfig().backend,
             rescue: readGlobalConfig().rescue,
             planner: readGlobalConfig().planner,
             scout: readGlobalConfig().scout,
@@ -293,6 +294,22 @@ export function startServer(
           await worker.compactMainThread();
           broadcastBoard();
           return json(store.getProjectState());
+        }
+
+        // Change the main agent backend (the model the loop owner + workers run
+        // on): codex / claude / local / pi.
+        if (url.pathname === "/api/backend" && request.method === "PATCH") {
+          const body = await readJson<{ backend?: string }>(request);
+          if (typeof body.backend !== "string" || !body.backend.trim()) {
+            return json({ error: "backend is required." }, 400);
+          }
+          const updated = updateGlobalConfig({
+            backend: normalizeBackend(body.backend.trim(), "codex"),
+          });
+          broadcastActivity(
+            store.appendEvent(null, null, "system", "config", `Main backend set to ${updated.backend}.`),
+          );
+          return json({ backend: describeBackend(updated), raw: updated.backend });
         }
 
         if (url.pathname === "/api/rescue" && request.method === "PATCH") {

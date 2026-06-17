@@ -12,6 +12,7 @@ export function App() {
   const [view, setView] = useState<"kanban" | "node">("kanban");
 
   const [logOpen, setLogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const activeGoal = board?.goals.find((g) => g.id === activeGoalId) ?? null;
 
   return (
@@ -23,7 +24,9 @@ export function App() {
         onView={setView}
         logOpen={logOpen}
         onToggleLog={() => setLogOpen((v) => !v)}
+        onSettings={() => setSettingsOpen(true)}
       />
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <AlertsBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
@@ -97,6 +100,115 @@ function AlertsBar() {
   );
 }
 
+const BACKENDS = ["codex", "claude", "local", "pi"] as const;
+
+// Model routing settings - the same knobs the TUI exposed (main backend +
+// rescue / planner / scout), live-editable via the config PATCH endpoints.
+function SettingsModal({ onClose }: { onClose: () => void }) {
+  const runtime = useStore((s) => s.runtime);
+  const setRuntime = useStore((s) => s.setRuntime);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const refresh = async () => setRuntime(await api.runtime());
+
+  const wrap = async (key: string, fn: () => Promise<unknown>) => {
+    setSaving(key);
+    try {
+      await fn();
+      await refresh();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const roleValue = (role?: { enabled: boolean; backend: string }) =>
+    role?.enabled ? role.backend : "off";
+
+  const RoleRow = (
+    { label, help, value, onChange }: {
+      label: string;
+      help: string;
+      value: string;
+      onChange: (v: string) => void;
+    },
+  ) => (
+    <div className="flex items-center justify-between gap-3 border-b border-slate-800 py-3">
+      <div>
+        <div className="text-sm font-medium text-slate-200">{label}</div>
+        <div className="text-xs text-slate-500">{help}</div>
+      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+      >
+        {["off", ...BACKENDS].map((b) => <option key={b} value={b}>{b}</option>)}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="w-[460px] rounded-lg border border-slate-700 bg-slate-900 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-base font-semibold">Model settings</span>
+          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200">✕</button>
+        </div>
+        {saving && <div className="mb-2 text-xs text-orange-400">Saving {saving}...</div>}
+
+        <div className="flex items-center justify-between gap-3 border-b border-slate-800 py-3">
+          <div>
+            <div className="text-sm font-medium text-slate-200">Main agent</div>
+            <div className="text-xs text-slate-500">
+              The model the loop owner and workers run on. ({runtime?.backend ?? "?"})
+            </div>
+          </div>
+          <select
+            value={runtime?.backendRaw ?? "codex"}
+            onChange={(e) => void wrap("main backend", () => api.setBackend(e.target.value))}
+            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+          >
+            {BACKENDS.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+
+        <RoleRow
+          label="Rescue model"
+          help="Senior model consulted when a task keeps failing. 'savior'."
+          value={roleValue(runtime?.rescue)}
+          onChange={(v) =>
+            void wrap("rescue", () =>
+              api.setRescue(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
+        />
+        <RoleRow
+          label="Planner model"
+          help="Compiles goals into tasks + win conditions. Off = follow main."
+          value={roleValue(runtime?.planner)}
+          onChange={(v) =>
+            void wrap("planner", () =>
+              api.setPlanner(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
+        />
+        <RoleRow
+          label="Scout model"
+          help="Proposes next-build ideas for your review. Off = no scouting."
+          value={roleValue(runtime?.scout)}
+          onChange={(v) =>
+            void wrap("scout", () =>
+              api.setScout(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
+        />
+
+        <div className="mt-4 text-xs text-slate-500">
+          Changes apply to new work immediately. codex uses your Codex login; claude uses Anthropic
+          usage; local/pi use your configured local model.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ActivityDrawer() {
   const lifecycle = useStore((s) => s.lifecycle);
   const recent = lifecycle.slice(-80).reverse();
@@ -128,13 +240,14 @@ function ActivityDrawer() {
 }
 
 function TopBar(
-  { conn, backend, view, onView, logOpen, onToggleLog }: {
+  { conn, backend, view, onView, logOpen, onToggleLog, onSettings }: {
     conn: string;
     backend?: string;
     view: "kanban" | "node";
     onView: (v: "kanban" | "node") => void;
     logOpen: boolean;
     onToggleLog: () => void;
+    onSettings: () => void;
   },
 ) {
   const dot = conn === "live" ? "bg-emerald-400" : conn === "down" ? "bg-red-400" : "bg-amber-400";
@@ -143,7 +256,14 @@ function TopBar(
       <span className="text-lg font-semibold tracking-tight">
         Loop<span className="text-orange-400">Forge</span>
       </span>
-      <span className="text-xs text-slate-400">{backend ?? "connecting..."}</span>
+      <button
+        type="button"
+        onClick={onSettings}
+        title="Model settings"
+        className="text-xs text-slate-400 hover:text-slate-200"
+      >
+        {backend ?? "connecting..."} ⚙
+      </button>
       <div className="ml-auto flex items-center gap-3">
         <button
           type="button"
@@ -442,15 +562,16 @@ function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; h
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            // Enter sends; Shift+Enter inserts a newline.
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void send();
             }
           }}
           rows={2}
           placeholder={hasOpenGoal
-            ? "Add a task / steer the active goal...  (Cmd/Ctrl+Enter)"
-            : "Describe a goal to build...  (Cmd/Ctrl+Enter)"}
+            ? "Add a task / steer the active goal...  (Enter to send, Shift+Enter for newline)"
+            : "Describe a goal to build...  (Enter to send, Shift+Enter for newline)"}
           className="flex-1 resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-orange-500/60"
         />
         <button

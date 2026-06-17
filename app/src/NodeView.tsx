@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Line, Text } from "@react-three/drei";
+import { Line, OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { useStore } from "./store";
 import type { PlanStep } from "./types";
@@ -225,9 +225,21 @@ export function NodeView({ goalId }: { goalId: string }) {
 
   return (
     <div className="relative min-h-0 flex-1">
-      <Canvas camera={{ position: [0, 0, 13], fov: 50 }} onPointerMissed={() => selectTask(null)}>
+      <Canvas
+        camera={{ position: [0, 0, subagents.length ? 18 : 13], fov: 50 }}
+        onPointerMissed={() => selectTask(null)}
+      >
         <ambientLight intensity={0.6} />
         <pointLight position={[0, 0, 6]} intensity={1.2} />
+        {/* Scroll to zoom, drag to orbit, right-drag to pan. */}
+        <OrbitControls
+          enablePan
+          enableZoom
+          enableRotate
+          minDistance={4}
+          maxDistance={40}
+          makeDefault
+        />
         <Core passed={passed} total={goalProbes.length} />
         {steps.map((step, i) => (
           <Node
@@ -253,7 +265,8 @@ export function NodeView({ goalId }: { goalId: string }) {
       </Canvas>
       <div className="pointer-events-none absolute left-3 top-3 text-xs text-slate-500">
         <span className="text-orange-400">●</span> main agent ·{" "}
-        <span className="text-violet-400">◆</span> sub-agents ({subagents.length})
+        <span className="text-violet-400">◆</span> sub-agents ({subagents.length}) ·{" "}
+        <span className="text-slate-600">scroll to zoom, drag to orbit</span>
       </div>
     </div>
   );

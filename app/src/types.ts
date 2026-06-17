@@ -74,6 +74,8 @@ export interface BoardSnapshot {
 
 export interface Runtime {
   backend?: string;
+  backendRaw?: string;
+  rescue?: { enabled: boolean; backend: string; afterAttempts: number };
   planner?: { enabled: boolean; backend: string };
   scout?: { enabled: boolean; backend: string };
 }

@@ -68,6 +68,18 @@ export const api = {
     jsonFetch<{ ok: boolean }>(`/api/goals/${encodeURIComponent(goalId)}`, {
       method: "DELETE",
     }),
+  // Settings: the model routing the TUI exposed (main backend + rescue/planner/scout).
+  setBackend: (backend: string) =>
+    jsonFetch<{ backend: string }>("/api/backend", {
+      method: "PATCH",
+      body: JSON.stringify({ backend }),
+    }),
+  setRescue: (patch: { enabled?: boolean; backend?: string; afterAttempts?: number }) =>
+    jsonFetch<unknown>("/api/rescue", { method: "PATCH", body: JSON.stringify(patch) }),
+  setPlanner: (patch: { enabled?: boolean; backend?: string }) =>
+    jsonFetch<unknown>("/api/planner", { method: "PATCH", body: JSON.stringify(patch) }),
+  setScout: (patch: { enabled?: boolean; backend?: string }) =>
+    jsonFetch<unknown>("/api/scout", { method: "PATCH", body: JSON.stringify(patch) }),
 };
 
 // Reconstruct a typed LifecycleEvent from a stored ActivityEvent (role=lifecycle,
