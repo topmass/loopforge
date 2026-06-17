@@ -717,6 +717,12 @@ function DetailPanel() {
   const related = lifecycle
     .filter((e) => e.taskId === selectedTaskId || e.data?.title === selectedTaskId)
     .slice(-20);
+  // For a sub-agent, the agent's recorded note is the latest merge/progress
+  // summary it reported back (its plan steps have no inline note field).
+  const subNote = isSub
+    ? related.filter((e) => e.kind === "subagent.merged" || e.kind === "subagent.progress").at(-1)
+      ?.summary ?? null
+    : null;
 
   const statusLabel = sub
     ? sub.state === "merged" ? "merged" : "running"
@@ -746,12 +752,12 @@ function DetailPanel() {
           {statusLabel}
         </span>
 
-        {step?.note && (
+        {(step?.note || subNote) && (
           <div className="mt-3">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
               What the agent recorded
             </div>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-300">{step.note}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-300">{step?.note ?? subNote}</p>
           </div>
         )}
 
@@ -762,7 +768,7 @@ function DetailPanel() {
           </div>
         )}
 
-        {!step?.note && !isSub && (
+        {!step?.note && !subNote && !isSub && (
           <p className="mt-3 text-sm text-slate-500">
             No notes yet - the agent fills this in as it works this item.
           </p>

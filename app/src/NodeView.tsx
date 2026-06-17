@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Line, OrbitControls, Stars, Text } from "@react-three/drei";
+import { Billboard, Line, OrbitControls, Stars, Text } from "@react-three/drei";
 import * as THREE from "three";
 import { useStore } from "./store";
 import type { PlanStep } from "./types";
@@ -155,9 +155,11 @@ function Core({ passed, total }: { passed: number; total: number }) {
       {total > 0 && ringPoints.length > 1 && (
         <Line points={ringPoints} color="#34d399" lineWidth={3} />
       )}
-      <Text position={[0, -2.05, 0]} fontSize={0.32} color="#cbd5e1" anchorX="center">
-        {total > 0 ? `${passed}/${total} win conditions` : "main agent"}
-      </Text>
+      <Billboard position={[0, -2.05, 0]}>
+        <Text fontSize={0.32} color="#cbd5e1" anchorX="center">
+          {total > 0 ? `${passed}/${total} win conditions` : "main agent"}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -188,12 +190,17 @@ function Node(
       />
       {(doing || selected) && <Glow color={color} scale={1.6} opacity={0.6} />}
       <mesh
-        ref={mesh}
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
         }}
+        onPointerOver={() => (document.body.style.cursor = "pointer")}
+        onPointerOut={() => (document.body.style.cursor = "default")}
       >
+        <sphereGeometry args={[0.95, 12, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh ref={mesh}>
         <sphereGeometry args={[selected ? 0.5 : 0.38, 24, 24]} />
         <meshStandardMaterial
           color={color}
@@ -202,15 +209,16 @@ function Node(
           roughness={0.5}
         />
       </mesh>
-      <Text
-        position={[0, 0.7, 0]}
-        fontSize={0.26}
-        color={selected ? "#ffffff" : "#94a3b8"}
-        anchorX="center"
-        maxWidth={3}
-      >
-        {step.title.slice(0, 40)}
-      </Text>
+      <Billboard position={[0, 0.7, 0]}>
+        <Text
+          fontSize={0.26}
+          color={selected ? "#ffffff" : "#94a3b8"}
+          anchorX="center"
+          maxWidth={3}
+        >
+          {step.title.slice(0, 40)}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -295,10 +303,12 @@ function Pulses({ steps }: { steps: PlanStep[] }) {
 // Sub-agents orbit on an outer ring as labeled satellites. Running ones breathe
 // light, spin, and keep a live DataStream to the core; merged ones go calm.
 function Subagent(
-  { title, state, position }: {
+  { title, state, position, selected, onSelect }: {
     title: string;
     state: "running" | "merged";
     position: [number, number, number];
+    selected: boolean;
+    onSelect: () => void;
   },
 ) {
   const mesh = useRef<THREE.Mesh>(null);
@@ -320,11 +330,23 @@ function Subagent(
       <Line
         points={[[0, 0, 0], [-position[0], -position[1], 0]]}
         color={running ? "#4c1d95" : "#1e3a5f"}
-        lineWidth={1}
+        lineWidth={selected ? 2 : 1}
       />
-      {running && <Glow color="#a78bfa" scale={1.9} opacity={0.7} />}
+      {(running || selected) && <Glow color={selected ? "#ede9fe" : "#a78bfa"} scale={selected ? 2.4 : 1.9} opacity={0.7} />}
+      {/* Generous invisible hit target so a drifting satellite stays easy to click. */}
+      <mesh
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+        onPointerOver={() => (document.body.style.cursor = "pointer")}
+        onPointerOut={() => (document.body.style.cursor = "default")}
+      >
+        <sphereGeometry args={[0.95, 12, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <mesh ref={mesh}>
-        <icosahedronGeometry args={[0.34, 0]} />
+        <icosahedronGeometry args={[selected ? 0.44 : 0.34, 0]} />
         <meshStandardMaterial
           color={color}
           emissive={color}
@@ -333,12 +355,21 @@ function Subagent(
           metalness={0.2}
         />
       </mesh>
-      <Text position={[0, 0.62, 0]} fontSize={0.22} color="#c4b5fd" anchorX="center" maxWidth={3}>
-        {title.replace(/^Spawned sub-agent\s*/i, "").slice(0, 32) || "sub-agent"}
-      </Text>
-      <Text position={[0, -0.58, 0]} fontSize={0.16} color={running ? "#a78bfa" : "#64748b"} anchorX="center">
-        {running ? "coding" : "merged"}
-      </Text>
+      <Billboard position={[0, 0.62, 0]}>
+        <Text
+          fontSize={0.22}
+          color={selected ? "#ffffff" : "#c4b5fd"}
+          anchorX="center"
+          maxWidth={3}
+        >
+          {title.replace(/^Spawned sub-agent\s*/i, "").slice(0, 32) || "sub-agent"}
+        </Text>
+      </Billboard>
+      <Billboard position={[0, -0.58, 0]}>
+        <Text fontSize={0.16} color={running ? "#a78bfa" : "#64748b"} anchorX="center">
+          {running ? "coding" : "merged"}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -380,7 +411,7 @@ export function NodeView({ goalId }: { goalId: string }) {
           enableZoom
           enableRotate
           autoRotate
-          autoRotateSpeed={0.35}
+          autoRotateSpeed={0.14}
           minDistance={4}
           maxDistance={44}
           makeDefault
@@ -402,7 +433,14 @@ export function NodeView({ goalId }: { goalId: string }) {
         })}
 
         {subagents.map((sa, i) => (
-          <Subagent key={`sa-${i}-${sa.title}`} title={sa.title} state={sa.state} position={subPositions[i]} />
+          <Subagent
+            key={`sa-${i}-${sa.title}`}
+            title={sa.title}
+            state={sa.state}
+            position={subPositions[i]}
+            selected={selectedTaskId === sa.title}
+            onSelect={() => selectTask(sa.title)}
+          />
         ))}
 
         {/* Ambient bidirectional telemetry for every running sub-agent. */}
