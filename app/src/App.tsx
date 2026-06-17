@@ -633,6 +633,7 @@ function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; h
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ask, setAsk] = useState(false);
 
   const send = async () => {
     const value = text.trim();
@@ -643,7 +644,7 @@ function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; h
       if (activeGoalId && hasOpenGoal) {
         await api.addTask(activeGoalId, value);
       } else {
-        await api.startGoalLoop(value);
+        await api.startGoalLoop(value, { questionMode: ask });
       }
       setText("");
     } catch (e) {
@@ -682,6 +683,17 @@ function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; h
           {hasOpenGoal ? "Add" : "Start"}
         </button>
       </div>
+      {!hasOpenGoal && (
+        <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-xs text-slate-400">
+          <input
+            type="checkbox"
+            checked={ask}
+            onChange={(e) => setAsk(e.target.checked)}
+            className="accent-orange-500"
+          />
+          Ask clarifying questions first (like Codex plan mode)
+        </label>
+      )}
     </div>
   );
 }

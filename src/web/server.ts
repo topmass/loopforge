@@ -113,6 +113,38 @@ export function startServer(
     });
   };
 
+  // Single place to launch a goal loop (start, resume, or steer-resume). Returns
+  // false if one is already running.
+  const launchGoalLoop = (
+    goalId: string,
+    opts: {
+      hours?: number;
+      tokenBudget?: number;
+      maxIterations?: number;
+      questionMode?: boolean;
+    } = {},
+  ): boolean => {
+    if (goalLoopRunning) {
+      return false;
+    }
+    goalLoopRunning = true;
+    queueMicrotask(() => {
+      const runner = new GoalLoopRunner(normalizedRoot, store, {
+        ...opts,
+        onEvent: broadcastActivity,
+        createCodexClient: options.createCodexClient,
+      });
+      runner.run(goalId).then(() => {
+        goalLoopRunning = false;
+        broadcastBoard();
+      }).catch((error) => {
+        goalLoopRunning = false;
+        broadcast("error", { message: error instanceof Error ? error.message : String(error) });
+      });
+    });
+    return true;
+  };
+
   const abort = new AbortController();
   const server = Deno.serve(
     {
@@ -612,7 +644,13 @@ export function startServer(
             return json({ error: "A goal loop is already running." }, 409);
           }
           const body = await readJson<
-            { text?: string; hours?: number; tokens?: number; iterations?: number }
+            {
+              text?: string;
+              hours?: number;
+              tokens?: number;
+              iterations?: number;
+              questionMode?: boolean;
+            }
           >(request);
           const text = body.text?.trim() ?? "";
           if (!text) {
@@ -632,27 +670,15 @@ export function startServer(
             probes: plan.probes,
           });
           broadcastBoard();
-          goalLoopRunning = true;
-          queueMicrotask(() => {
-            const runner = new GoalLoopRunner(normalizedRoot, store, {
-              hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
-              tokenBudget: typeof body.tokens === "number" && body.tokens > 0
-                ? body.tokens
-                : undefined,
-              maxIterations: typeof body.iterations === "number" && body.iterations > 0
-                ? Math.floor(body.iterations)
-                : undefined,
-              onEvent: broadcastActivity,
-              createCodexClient: options.createCodexClient,
-            });
-            runner.run(created.goal.id).then(() => {
-              goalLoopRunning = false;
-              broadcastBoard();
-            }).catch((error) => {
-              goalLoopRunning = false;
-              const message = error instanceof Error ? error.message : String(error);
-              broadcast("error", { message });
-            });
+          launchGoalLoop(created.goal.id, {
+            hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
+            tokenBudget: typeof body.tokens === "number" && body.tokens > 0
+              ? body.tokens
+              : undefined,
+            maxIterations: typeof body.iterations === "number" && body.iterations > 0
+              ? Math.floor(body.iterations)
+              : undefined,
+            questionMode: body.questionMode === true,
           });
           return json({ ok: true, goalId: created.goal.id, running: true }, 201);
         }
@@ -677,8 +703,12 @@ export function startServer(
             summary: text,
             data: { text },
           }));
+          // If no loop is running (e.g. it stopped after asking questions, or a
+          // prior run ended), adding a task resumes the loop so the answer/steer
+          // is acted on. A live loop just picks it up on its next turn.
+          const resumed = launchGoalLoop(goalId);
           broadcastBoard();
-          return json({ ok: true, goalId });
+          return json({ ok: true, goalId, resumed });
         }
 
         // Edit a goal's objective; the loop injects an objective-updated steer.
@@ -702,30 +732,18 @@ export function startServer(
           }
           const goalId = decodeURIComponent(loopMatch[1]).toUpperCase();
           store.getGoal(goalId);
-          const body = await readJson<{ hours?: number; tokens?: number; iterations?: number }>(
-            request,
-          );
-          goalLoopRunning = true;
-          queueMicrotask(() => {
-            const runner = new GoalLoopRunner(normalizedRoot, store, {
-              hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
-              tokenBudget: typeof body.tokens === "number" && body.tokens > 0
-                ? body.tokens
-                : undefined,
-              maxIterations: typeof body.iterations === "number" && body.iterations > 0
-                ? Math.floor(body.iterations)
-                : undefined,
-              onEvent: broadcastActivity,
-              createCodexClient: options.createCodexClient,
-            });
-            runner.run(goalId).then(() => {
-              goalLoopRunning = false;
-              broadcastBoard();
-            }).catch((error) => {
-              goalLoopRunning = false;
-              const message = error instanceof Error ? error.message : String(error);
-              broadcast("error", { message });
-            });
+          const body = await readJson<
+            { hours?: number; tokens?: number; iterations?: number; questionMode?: boolean }
+          >(request);
+          launchGoalLoop(goalId, {
+            hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
+            tokenBudget: typeof body.tokens === "number" && body.tokens > 0
+              ? body.tokens
+              : undefined,
+            maxIterations: typeof body.iterations === "number" && body.iterations > 0
+              ? Math.floor(body.iterations)
+              : undefined,
+            questionMode: body.questionMode === true,
           });
           return json({ ok: true, goalId, running: true });
         }

@@ -37,7 +37,7 @@ export const api = {
       `/api/lifecycle${goalId ? `?goalId=${encodeURIComponent(goalId)}` : ""}`,
     ),
   // Start a fresh goal-loop from plain text (no active goal yet).
-  startGoalLoop: (text: string, opts?: { hours?: number }) =>
+  startGoalLoop: (text: string, opts?: { hours?: number; questionMode?: boolean }) =>
     jsonFetch<{ goalId: string }>("/api/goals/loop", {
       method: "POST",
       body: JSON.stringify({ text, ...opts }),

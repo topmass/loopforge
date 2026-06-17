@@ -438,3 +438,60 @@ Deno.test("goal loop delegates a fan-out, merges sub-agents, then completes", as
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("question mode asks first, then plans after the answer is queued", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Build something");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      questionMode: true,
+      maxIterations: 3,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, (_cwd, turn) => {
+          // First (clarify) turn: ask questions, do NOT write a plan.
+          if (turn === 1) {
+            return Promise.resolve("1. Which framework?\n2. Auth needed?\nLOOP_QUESTIONS");
+          }
+          // After the answer is queued, the (new) first turn plans + completes.
+          return (async () => {
+            await Deno.writeTextFile(`${_cwd}/LOOP_PLAN.md`, "# Plan\n- [x] Done -- built it\n");
+            return "LOOP_COMPLETE";
+          })();
+        });
+        return client;
+      },
+    });
+    const first = await runner.run(goal.id);
+    assertEquals(first.outcome, "blocked");
+    assertStringIncludes(first.detail, "Which framework");
+    // No plan file was written during the clarify turn.
+    const feed1 = store.listLifecycleEvents(goal.id).map((e) => e.kind);
+    assert(feed1.includes("goal.blocked"));
+    assert(!feed1.includes("plan.updated"));
+
+    // The user answers; a fresh run (auto-resume in the server) now plans.
+    store.enqueueGoalMessage(goal.id, "user", "React, no auth");
+    const runner2 = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      questionMode: true,
+      maxIterations: 3,
+      onEvent: () => {},
+      createCodexClient: (onEvent) =>
+        new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [x] Done -- built it\n");
+          return "LOOP_COMPLETE";
+        }),
+    });
+    const second = await runner2.run(goal.id);
+    assertEquals(second.outcome, "merged");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});

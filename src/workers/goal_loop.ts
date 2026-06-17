@@ -47,6 +47,10 @@ export interface GoalLoopOptions {
   tokenBudget?: number;
   maxIterations?: number;
   runMode?: RunMode;
+  // Ask clarifying questions before planning (Codex-style). One-shot: the very
+  // first turn asks, the loop stops; answering in chat auto-resumes it and the
+  // answers (now queued) make it plan instead of re-asking.
+  questionMode?: boolean;
   onEvent?: (event: ActivityEvent) => void;
   createCodexClient?: (
     onEvent: (event: ActivityEventInput) => void,
@@ -143,7 +147,14 @@ export class GoalLoopRunner {
           `Loop iteration ${iteration}/${maxIterations} started.${wrapUp ? ` (wrap-up: ${wrapUp})` : ""}`,
         );
         responseText = "";
-        const prompt = iteration === 1 && !await this.planFileExists(assignment.worktreePath)
+        const planExists = await this.planFileExists(assignment.worktreePath);
+        // Clarify-first: only on the very first turn, before any plan, and only
+        // until the user has answered (queued answers turn it into planning).
+        const doClarify = Boolean(this.options.questionMode) && iteration === 1 &&
+          !planExists && queued.length === 0;
+        const prompt = doClarify
+          ? this.buildClarifyPrompt(goal, projectInstructions)
+          : iteration === 1 && !planExists
           ? this.buildFirstPrompt(goal, projectInstructions, queued.map((m) => m.message))
           : this.buildContinuationPrompt(queued.map((m) => m.message), probeFeedback, {
             wrapUp,
@@ -167,6 +178,20 @@ export class GoalLoopRunner {
             continue;
           }
           throw error;
+        }
+        // Clarify turn: surface the agent's questions and stop. Answering in
+        // chat re-runs the loop with the answers queued, so it plans next time.
+        if (doClarify) {
+          const questions = extractQuestions(responseText);
+          this.emit(this.store.appendLifecycleEvent({
+            kind: "goal.blocked",
+            goalId,
+            taskId: null,
+            summary: questions,
+            data: { questions: true },
+          }));
+          this.emitEvent(goalId, "questions", questions);
+          return this.finish(goalId, iteration, "blocked", questions);
         }
         if (queued.length) {
           this.store.markGoalMessagesProcessed(queued.map((message) => message.id));
@@ -393,6 +418,21 @@ export class GoalLoopRunner {
     return session;
   }
 
+  private buildClarifyPrompt(goal: Goal, projectInstructions: string): string {
+    return `You are the LoopForge goal loop owner for ${goal.id}. The user wants to clarify scope BEFORE you plan or build.
+
+Goal:
+${goal.text}
+
+Project context from the original folder:
+${projectInstructions}
+
+Ask 2-4 specific, high-value clarifying questions whose answers would change how you build this
+(stack/library choices, scope boundaries, must-haves vs nice-to-haves, success criteria,
+constraints). Be concise - a short numbered list. Do NOT create or edit any files, and do NOT
+plan yet. End your reply with a line containing only: LOOP_QUESTIONS`;
+  }
+
   private buildFirstPrompt(goal: Goal, projectInstructions: string, addedTasks: string[] = []): string {
     const probes = this.store.listProbes(goal.id);
     const addedBlock = addedTasks.length
@@ -483,6 +523,14 @@ End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> o
   private emit(event: ActivityEvent): void {
     this.options.onEvent?.(event);
   }
+}
+
+// The clarify turn's questions are everything before the LOOP_QUESTIONS marker.
+function extractQuestions(responseText: string): string {
+  const text = responseText.trim();
+  const idx = text.indexOf("LOOP_QUESTIONS");
+  const body = (idx >= 0 ? text.slice(0, idx) : text).trim();
+  return body || "The agent has clarifying questions before planning - reply to continue.";
 }
 
 // Best-effort cumulative token total from a backend event (codex reports it on
