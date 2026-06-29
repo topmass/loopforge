@@ -20,6 +20,12 @@ export interface VerificationResult {
   notes: string;
 }
 
+const VERDICT_TOKENS = {
+  passed: "VERIFICATION_PASSED",
+  failed: "VERIFICATION_FAILED",
+  needs_input: "NEEDS_INPUT",
+} as const;
+
 export class GoalTestEngineer {
   constructor(
     private readonly projectInstructions: string,
@@ -110,6 +116,12 @@ VERIFICATION_PASSED
 - <command you ran>: <observed result>
 Test files changed: <list or none>
 Remaining risks: <one line or none>
+
+- Then, as the LAST thing in your answer, output one authoritative machine verdict block, exactly:
+\`\`\`loopforge-verdict
+{"verdict":"passed","proofs":[{"command":"<cmd you actually ran>","result":"<observed result>"}],"testFilesChanged":["<path>"],"remainingRisks":"<one line or empty>"}
+\`\`\`
+- This block is authoritative and overrides the prose. "passed" requires at least one proof whose command you actually ran; a pass with no proof is rejected. For "failed" or "needs_input", put the failing command and its output in proofs and the blocker in remainingRisks.
 	`;
 }
 
@@ -121,6 +133,12 @@ export function parseVerificationResponse(responseText: string): VerificationRes
       notes:
         "VERIFICATION_FAILED\n- Test engineer returned no explicit verification verdict or notes.",
     };
+  }
+  // Prefer the authoritative machine verdict block; only scrape prose tokens
+  // when the engineer omitted or malformed it.
+  const structured = parseStructuredVerdict(notes);
+  if (structured) {
+    return structured;
   }
   const verdict = extractVerificationVerdictToken(notes);
   const normalized = verdict && !notes.toUpperCase().startsWith(verdict)
@@ -171,4 +189,85 @@ function hasProofDetails(notes: string): boolean {
   return lines.slice(1).some((line) =>
     !/^VERIFICATION_PASSED\b/i.test(line) && line.replace(/^[-*]\s*/, "").length >= 8
   );
+}
+
+interface StructuredVerdict {
+  verdict: "passed" | "failed" | "needs_input";
+  proofs?: Array<{ command?: unknown; result?: unknown }>;
+  testFilesChanged?: unknown;
+  remainingRisks?: unknown;
+}
+
+// The test engineer emits an authoritative machine verdict in a fenced
+// ```loopforge-verdict block. Parsing it deterministically beats scraping a
+// PASS token out of prose narration, which a model can trip accidentally.
+// Returns null when no valid block is present so callers fall back to the
+// legacy token scan. The notes it returns lead with the same VERIFICATION_*
+// token + "- cmd: result" proof lines the downstream blob parser expects, so
+// nothing further along the pipeline needs to change.
+export function parseStructuredVerdict(responseText: string): VerificationResult | null {
+  const block = extractVerdictBlock(responseText);
+  if (!block) {
+    return null;
+  }
+  let parsed: StructuredVerdict;
+  try {
+    parsed = JSON.parse(block) as StructuredVerdict;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const verdict = parsed.verdict;
+  if (verdict !== "passed" && verdict !== "failed" && verdict !== "needs_input") {
+    return null;
+  }
+  const proofs = Array.isArray(parsed.proofs)
+    ? parsed.proofs
+      .map((proof) => ({
+        command: typeof proof?.command === "string" ? proof.command.trim() : "",
+        result: typeof proof?.result === "string" ? proof.result.trim() : "",
+      }))
+      .filter((proof) => proof.command && proof.result)
+    : [];
+  // Passing without at least one command+result proof fails closed, matching
+  // the prose path's rule that a bare pass is not trusted.
+  if (verdict === "passed" && proofs.length === 0) {
+    return {
+      verdict: "failed",
+      notes: [
+        VERDICT_TOKENS.failed,
+        "- Structured verdict claimed passed without any command/result proof.",
+        "",
+        "Original response:",
+        responseText.trim(),
+      ].join("\n"),
+    };
+  }
+  const testFiles = Array.isArray(parsed.testFilesChanged)
+    ? parsed.testFilesChanged.filter((file): file is string => typeof file === "string")
+    : [];
+  const remainingRisks = typeof parsed.remainingRisks === "string"
+    ? parsed.remainingRisks.trim()
+    : "";
+  const notes = [
+    VERDICT_TOKENS[verdict],
+    ...proofs.map((proof) => `- ${proof.command}: ${proof.result}`),
+    `Test files changed: ${testFiles.length ? testFiles.join(", ") : "none"}`,
+    `Remaining risks: ${remainingRisks || "none"}`,
+  ].join("\n");
+  return { verdict, notes };
+}
+
+function extractVerdictBlock(text: string): string | null {
+  const tagged = text.match(/```loopforge-verdict\s*\n([\s\S]*?)```/i);
+  if (tagged) {
+    return tagged[1].trim();
+  }
+  const json = text.match(/```json\s*\n([\s\S]*?)```/i);
+  if (json && /"verdict"\s*:/.test(json[1])) {
+    return json[1].trim();
+  }
+  return null;
 }
