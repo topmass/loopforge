@@ -70,17 +70,34 @@ export interface CodexClient {
   stop(): Promise<void>;
 }
 
+// The subset of Deno.ChildProcess the client actually uses. A real child
+// satisfies it structurally; tests inject a fake so bridge supervision can be
+// exercised without spawning uv.
+export interface BridgeProcess {
+  readonly stdin: WritableStream<Uint8Array>;
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly status: Promise<{ success: boolean; code: number }>;
+  kill(signo?: Deno.Signal): void;
+}
+
+export type BridgeSpawn = (cwd: string) => BridgeProcess;
+
 export class CodexAppServerClient implements CodexClient {
-  private child: Deno.ChildProcess | null = null;
+  private child: BridgeProcess | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private readonly encoder = new TextEncoder();
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
+  private exitTimes: number[] = [];
+  private static readonly CRASH_WINDOW_MS = 10_000;
+  private static readonly CRASH_THRESHOLD = 3;
 
   constructor(
     private readonly onEvent: CodexEventHandler = () => {},
     private readonly settings: Pick<LoopForgeConfig, "model" | "reasoningEffort" | "fastMode"> =
       readConfig(Deno.cwd()),
+    private readonly spawnBridge: BridgeSpawn = defaultBridgeSpawn,
   ) {}
 
   async startSession(cwd: string, options: CodexSessionOptions = {}): Promise<CodexSession> {
@@ -242,32 +259,59 @@ export class CodexAppServerClient implements CodexClient {
     if (this.child) {
       return;
     }
-    const command = new Deno.Command("uv", {
-      args: [
-        "run",
-        "--prerelease=allow",
-        "--with",
-        "openai-codex",
-        "python",
-        new URL("../../scripts/loopforge_codex_bridge.py", import.meta.url).pathname,
-      ],
-      cwd,
-      stdin: "piped",
-      stdout: "piped",
-      stderr: "piped",
-    });
-    this.child = command.spawn();
-    this.writer = this.child.stdin.getWriter();
-    this.readStdout(this.child.stdout);
-    this.readStderr(this.child.stderr);
-    this.child.status.then((status) => {
-      if (!status.success) {
-        for (const pending of this.pending.values()) {
-          pending.reject(new Error(`Codex SDK bridge exited with code ${status.code}.`));
-        }
-        this.pending.clear();
+    if (
+      isCrashLooping(
+        this.exitTimes,
+        Date.now(),
+        CodexAppServerClient.CRASH_WINDOW_MS,
+        CodexAppServerClient.CRASH_THRESHOLD,
+      )
+    ) {
+      throw new Error(
+        `Codex SDK bridge crash-looped ${CodexAppServerClient.CRASH_THRESHOLD} times in ` +
+          `${CodexAppServerClient.CRASH_WINDOW_MS / 1000}s; not restarting. ` +
+          `Check that 'uv run --with openai-codex' works.`,
+      );
+    }
+    const child = this.spawnBridge(cwd);
+    this.child = child;
+    this.writer = child.stdin.getWriter();
+    this.readStdout(child.stdout);
+    this.readStderr(child.stderr);
+    child.status
+      .then((status) => this.handleExit(child, status.success, status.code))
+      .catch(() => this.handleExit(child, false, -1));
+  }
+
+  // A crashed bridge used to leave its dead handle in place, wedging every
+  // later request behind the `if (this.child) return` guard. Clear the handles
+  // so the next request respawns, reject any in-flight requests as
+  // unknown-outcome (never silently retried), and track rapid crashes so a
+  // broken bridge cannot fork-bomb uv.
+  private handleExit(child: BridgeProcess, success: boolean, code: number): void {
+    if (this.child !== child) {
+      return;
+    }
+    this.child = null;
+    this.writer = null;
+    if (!success) {
+      const now = Date.now();
+      this.exitTimes.push(now);
+      this.exitTimes = this.exitTimes.filter(
+        (time) => time >= now - CodexAppServerClient.CRASH_WINDOW_MS,
+      );
+    }
+    if (this.pending.size > 0) {
+      const reason = new Error(
+        `Codex SDK bridge exited${
+          success ? "" : ` with code ${code}`
+        }; in-flight turn outcome is unknown and was not retried.`,
+      );
+      for (const pending of this.pending.values()) {
+        pending.reject(reason);
       }
-    });
+      this.pending.clear();
+    }
   }
 
   private async request(op: string, params: unknown): Promise<JsonObject> {
@@ -387,4 +431,32 @@ function stringResult(value: unknown, message: string): string {
     return value;
   }
   throw new Error(message);
+}
+
+export function isCrashLooping(
+  exitTimes: number[],
+  now: number,
+  windowMs: number,
+  threshold: number,
+): boolean {
+  const recent = exitTimes.filter((time) => time >= now - windowMs);
+  return recent.length >= threshold;
+}
+
+function defaultBridgeSpawn(cwd: string): Deno.ChildProcess {
+  const command = new Deno.Command("uv", {
+    args: [
+      "run",
+      "--prerelease=allow",
+      "--with",
+      "openai-codex",
+      "python",
+      new URL("../../scripts/loopforge_codex_bridge.py", import.meta.url).pathname,
+    ],
+    cwd,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  });
+  return command.spawn();
 }
