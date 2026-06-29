@@ -53,6 +53,19 @@ export function createPlannerClient(
   return createAgentClient(root, onEvent, config);
 }
 
+// The reviewer role gates the merge and can run on a stronger backend than the
+// execution loop: implement on a cheap/local model, review on a powerhouse.
+export function createReviewerClient(
+  root: string,
+  onEvent: (event: ActivityEventInput) => void,
+  config: GlobalConfig = readGlobalConfig(),
+): CodexClient {
+  if (config.reviewer.enabled) {
+    return createAgentClient(root, onEvent, { ...config, backend: config.reviewer.backend });
+  }
+  return createAgentClient(root, onEvent, config);
+}
+
 export function piModelsPath(): string {
   const override = Deno.env.get("LOOPFORGE_PI_MODELS_PATH");
   if (override?.trim()) {

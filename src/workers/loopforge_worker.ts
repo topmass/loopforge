@@ -7,7 +7,7 @@ import {
   CodexSessionOptions,
   CodexTurnResult,
 } from "./codex_app_server.ts";
-import { createAgentClient, createPlannerClient } from "./agent_backend.ts";
+import { createAgentClient, createPlannerClient, createReviewerClient } from "./agent_backend.ts";
 import { readGlobalConfig } from "../board/global_config.ts";
 import { consultRescue, RescueClientFactory } from "./rescue.ts";
 import { extractTurnId } from "./codex_event_normalizer.ts";
@@ -53,6 +53,9 @@ export interface LoopForgeWorkerOptions {
   createPlannerClient?: (
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
+  createReviewerClient?: (
+    onEvent: (event: ActivityEventInput) => void,
+  ) => CodexClient;
   createRescueClient?: RescueClientFactory;
   pullRequestGate?: PullRequestGate;
 }
@@ -71,6 +74,9 @@ export class LoopForgeWorker {
   readonly createPlannerClient: (
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
+  readonly createReviewerClient: (
+    onEvent: (event: ActivityEventInput) => void,
+  ) => CodexClient;
   readonly pullRequestGate: PullRequestGate;
   readonly runMode: RunMode;
   private readonly createRescueClient?: RescueClientFactory;
@@ -84,6 +90,8 @@ export class LoopForgeWorker {
       ((onEvent) => createAgentClient(this.root, onEvent));
     this.createPlannerClient = options.createPlannerClient ?? options.createCodexClient ??
       ((onEvent) => createPlannerClient(this.root, onEvent));
+    this.createReviewerClient = options.createReviewerClient ?? options.createCodexClient ??
+      ((onEvent) => createReviewerClient(this.root, onEvent));
     this.createRescueClient = options.createRescueClient;
     this.pullRequestGate = options.pullRequestGate ?? new GhPullRequestGate(this.root);
     this.runMode = options.runMode ?? "attended";
@@ -1583,7 +1591,7 @@ export class LoopForgeWorker {
     });
     const reviewer = new GoalReviewer(this.root, {
       runMode: this.runMode,
-      createCodexClient: this.createCodexClient,
+      createCodexClient: this.createReviewerClient,
       onEvent: (event) => {
         if (shouldRecordActivity(event)) {
           this.emit(

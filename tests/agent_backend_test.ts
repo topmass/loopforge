@@ -8,6 +8,7 @@ import {
 import {
   createAgentClient,
   createPlannerClient,
+  createReviewerClient,
   ensureLocalPiProvider,
   LOCAL_PI_PROVIDER_ID,
 } from "../src/workers/agent_backend.ts";
@@ -91,6 +92,29 @@ Deno.test("planner config persists and routes the planner client independently",
       updateGlobalConfig({ planner: { enabled: false } });
       assert(createPlannerClient(root, () => {}) instanceof PiRpcClient);
       assertEquals(readGlobalConfig().planner.backend, "codex");
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+});
+
+Deno.test("reviewer config routes review to its own backend (implement on pi, review on codex)", () => {
+  withTempHome(() => {
+    const root = Deno.makeTempDirSync();
+    try {
+      assertEquals(readGlobalConfig().reviewer, { enabled: false, backend: "codex" });
+      // Disabled reviewer follows the execution backend.
+      updateGlobalConfig({ backend: "pi" });
+      assert(createReviewerClient(root, () => {}) instanceof PiRpcClient);
+
+      // Enabled reviewer runs on its own backend while the loop still grinds on pi.
+      updateGlobalConfig({ reviewer: { enabled: true, backend: "codex" } });
+      assert(createReviewerClient(root, () => {}) instanceof CodexAppServerClient);
+      assert(createAgentClient(root, () => {}) instanceof PiRpcClient);
+      assertEquals(readGlobalConfig().reviewer, { enabled: true, backend: "codex" });
+
+      updateGlobalConfig({ reviewer: { enabled: false } });
+      assert(createReviewerClient(root, () => {}) instanceof PiRpcClient);
     } finally {
       Deno.removeSync(root, { recursive: true });
     }
