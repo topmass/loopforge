@@ -1956,7 +1956,29 @@ ${result.notes}`,
   }
 
   private async mergeBranch(branchName: string): Promise<string> {
-    return await this.runSerialized(() => gitMergeBranch(this.root, branchName));
+    // runSerialized orders merges within this process; the board lease orders
+    // them across separate LoopForge processes sharing this root, so two
+    // workers never run `git merge` into the same repo at once.
+    return await this.runSerialized(async () => {
+      const key = `merge:${this.root}`;
+      const holder = `merge-${Deno.pid}-${crypto.randomUUID()}`;
+      await this.acquireLeaseBlocking(key, holder);
+      try {
+        return await gitMergeBranch(this.root, branchName);
+      } finally {
+        this.store.releaseLease(key, holder);
+      }
+    });
+  }
+
+  private async acquireLeaseBlocking(key: string, holder: string): Promise<void> {
+    const deadlineAt = Date.now() + 60_000;
+    while (!this.store.acquireLease(key, holder)) {
+      if (Date.now() >= deadlineAt) {
+        throw new Error(`Timed out waiting for the ${key} lease.`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
   }
 
   private async runHooks(

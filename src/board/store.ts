@@ -342,7 +342,11 @@ export class BoardStore {
     return goalFromRow(row);
   }
 
-  closeGoal(goalId: string, summary = "", options: { force?: boolean } = {}): { goal: Goal; event: ActivityEvent } {
+  closeGoal(
+    goalId: string,
+    summary = "",
+    options: { force?: boolean } = {},
+  ): { goal: Goal; event: ActivityEvent } {
     const goal = this.getGoal(goalId);
     if (goal.status === "closed") {
       const event = this.appendEvent(
@@ -1711,6 +1715,13 @@ export class BoardStore {
         started_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS leases (
+        key TEXT PRIMARY KEY,
+        holder TEXT NOT NULL,
+        acquired_at INTEGER NOT NULL,
+        heartbeat_at INTEGER NOT NULL
+      );
     `);
     this.ensureColumn("tasks", "parent_thread_id", "TEXT");
     this.ensureColumn("goals", "completion_contract", "TEXT NOT NULL DEFAULT ''");
@@ -1760,6 +1771,60 @@ export class BoardStore {
     if (!columns.some((row) => row.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
+  }
+
+  // ---- Cross-process advisory leases ----------------------------------------
+  // A DB-backed lock so work coordinated through this board (most importantly
+  // git merges into the root repo) serializes across separate LoopForge
+  // processes, not just within one process's in-memory promise chain. A lease
+  // whose heartbeat is older than staleMs is treated as abandoned so a crashed
+  // holder never wedges a key forever.
+
+  acquireLease(
+    key: string,
+    holder: string,
+    staleMs = 60_000,
+    now: number = Date.now(),
+  ): boolean {
+    const existing = this.db.prepare(
+      "SELECT holder, heartbeat_at FROM leases WHERE key = ?",
+    ).get(key) as { holder: string; heartbeat_at: number } | undefined;
+    if (!existing) {
+      try {
+        this.db.prepare(
+          "INSERT INTO leases (key, holder, acquired_at, heartbeat_at) VALUES (?, ?, ?, ?)",
+        ).run(key, holder, now, now);
+        return true;
+      } catch {
+        // Lost an insert race to a concurrent acquirer.
+        return false;
+      }
+    }
+    if (existing.holder === holder) {
+      this.db.prepare("UPDATE leases SET heartbeat_at = ? WHERE key = ? AND holder = ?")
+        .run(now, key, holder);
+      return true;
+    }
+    if (now - existing.heartbeat_at <= staleMs) {
+      return false;
+    }
+    // The current holder looks dead; steal the lease only if nobody else moved
+    // its heartbeat since we read it (compare-and-swap on heartbeat_at).
+    const result = this.db.prepare(
+      "UPDATE leases SET holder = ?, acquired_at = ?, heartbeat_at = ? WHERE key = ? AND heartbeat_at = ?",
+    ).run(holder, now, now, key, existing.heartbeat_at);
+    return Number(result.changes) > 0;
+  }
+
+  heartbeatLease(key: string, holder: string, now: number = Date.now()): boolean {
+    const result = this.db.prepare(
+      "UPDATE leases SET heartbeat_at = ? WHERE key = ? AND holder = ?",
+    ).run(now, key, holder);
+    return Number(result.changes) > 0;
+  }
+
+  releaseLease(key: string, holder: string): void {
+    this.db.prepare("DELETE FROM leases WHERE key = ? AND holder = ?").run(key, holder);
   }
 
   private listGoals(): Goal[] {
