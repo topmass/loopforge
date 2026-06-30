@@ -190,6 +190,50 @@ Deno.test("server runtime exposes active worker status for the live strip", asyn
   }
 });
 
+Deno.test("server runtime exposes live fan-out agents and hides finished ones", async () => {
+  const root = Deno.makeTempDirSync();
+  const boot = new BoardStore(root);
+  boot.initProject();
+  boot.close();
+
+  const port = 49533 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const store = new BoardStore(root);
+    try {
+      // A goal-loop fan-out agent reports onto the board the same way the
+      // dispatcher tasks do, so the Kanban shows both paths.
+      store.reportExternalAgent({
+        id: "GOAL-1-0",
+        agent: "Repair merge race",
+        state: "working",
+        headline: "Working: repair merge race",
+      });
+      store.reportExternalAgent({
+        id: "GOAL-1-1",
+        agent: "Finished subtask",
+        state: "done",
+        headline: "merged",
+      });
+    } finally {
+      store.close();
+    }
+
+    const runtime = await fetch(`${server.url}/api/runtime`).then((response) => response.json());
+    // Only the live agent is surfaced; the done one is filtered out.
+    assertEquals(runtime.externalAgents.length, 1);
+    assertEquals(runtime.externalAgents[0].id, "GOAL-1-0");
+    assertEquals(runtime.externalAgents[0].agent, "Repair merge race");
+    assertEquals(runtime.externalAgents[0].state, "working");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("server requests a running task stop", async () => {
   const root = Deno.makeTempDirSync();
   const port = 49133 + Math.floor(Math.random() * 300);

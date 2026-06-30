@@ -5,7 +5,7 @@
 // write-scope contract - lifted from Codex's spawn_agent guidance - is the core
 // safety invariant: enforced here, not just requested.
 
-import { ActivityEvent, ActivityEventInput } from "../board/types.ts";
+import { ActivityEvent, ActivityEventInput, ExternalAgentState } from "../board/types.ts";
 import { BoardStore } from "../board/store.ts";
 import { CodexClient } from "./codex_app_server.ts";
 import { gitCommitAll, gitMergeBranch, gitPushBranch, prepareFanoutWorktree } from "./git_utils.ts";
@@ -80,7 +80,9 @@ export function findScopeConflict(subtasks: FanoutSubtask[]): string | null {
       const prefix = scopePrefix(glob);
       for (const existing of owned) {
         if (prefixOverlaps(prefix, existing.prefix) && existing.title !== sub.title) {
-          return `"${sub.title}" (${glob}) overlaps "${existing.title}" (${existing.prefix || "/"})`;
+          return `"${sub.title}" (${glob}) overlaps "${existing.title}" (${
+            existing.prefix || "/"
+          })`;
         }
       }
       owned.push({ prefix, title: sub.title });
@@ -121,6 +123,23 @@ export class FanoutRunner {
     private readonly options: FanoutRunnerOptions,
   ) {}
 
+  // Mirror a fan-out sub-agent's lifecycle onto the board's external-agents
+  // table, so the goal-loop path shows up on the Kanban / Active Workers strip
+  // alongside dispatcher tasks. Best-effort: a report never fails a run.
+  private reportAgent(
+    subId: string,
+    title: string,
+    state: ExternalAgentState,
+    headline: string,
+    cwd?: string,
+  ): void {
+    try {
+      this.store.reportExternalAgent({ id: subId, agent: title, state, headline, cwd });
+    } catch {
+      // Board observability only.
+    }
+  }
+
   // Run subtasks concurrently (bounded by maxConcurrency) in their own
   // worktrees off the loop branch, then merge each sub-branch back into the
   // loop worktree sequentially. Emits subagent.* lifecycle events throughout.
@@ -131,7 +150,8 @@ export class FanoutRunner {
     subtasks: FanoutSubtask[],
   ): Promise<FanoutResult> {
     const result: FanoutResult = { merged: [], failed: [] };
-    const completed: Array<{ sub: FanoutSubtask; branch: string; summary: string }> = [];
+    const completed: Array<{ subId: string; sub: FanoutSubtask; branch: string; summary: string }> =
+      [];
     let index = 0;
     let nextWorker = 0;
 
@@ -144,8 +164,16 @@ export class FanoutRunner {
         summary: sub.title,
         data: { title: sub.title, writeScope: sub.writeScope },
       }));
+      this.reportAgent(subId, sub.title, "working", `Starting: ${sub.title}`);
       try {
         const assignment = await prepareFanoutWorktree(this.root, loopBranch, subId);
+        this.reportAgent(
+          subId,
+          sub.title,
+          "working",
+          `Working: ${sub.title}`,
+          assignment.worktreePath,
+        );
         let responseText = "";
         const codex = this.options.createCodexClient((event) => {
           if (event.role === "codex" && event.kind === "agent") {
@@ -175,10 +203,18 @@ export class FanoutRunner {
           pushed = await gitPushBranch(assignment.worktreePath, assignment.branchName);
         }
         completed.push({
+          subId,
           sub,
           branch: assignment.branchName,
           summary: responseText.trim().slice(0, 600) || "(no summary)",
         });
+        this.reportAgent(
+          subId,
+          sub.title,
+          "working",
+          `${sub.title} - ready to merge`,
+          assignment.worktreePath,
+        );
         this.emit(this.store.appendLifecycleEvent({
           kind: "subagent.progress",
           goalId,
@@ -189,10 +225,9 @@ export class FanoutRunner {
           data: { title: sub.title, branch: assignment.branchName, pushed },
         }));
       } catch (error) {
-        result.failed.push({
-          title: sub.title,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        const message = error instanceof Error ? error.message : String(error);
+        this.reportAgent(subId, sub.title, "blocked", `${sub.title} - ${message}`.slice(0, 200));
+        result.failed.push({ title: sub.title, error: message });
       }
     };
 
@@ -229,6 +264,7 @@ export class FanoutRunner {
       try {
         await gitMergeBranch(loopWorktree, done.branch);
         result.merged.push({ title: done.sub.title, branch: done.branch, summary: done.summary });
+        this.reportAgent(done.subId, done.sub.title, "done", `${done.sub.title} - merged`);
         this.emit(this.store.appendLifecycleEvent({
           kind: "subagent.merged",
           goalId,
@@ -237,10 +273,9 @@ export class FanoutRunner {
           data: { title: done.sub.title, branch: done.branch },
         }));
       } catch (error) {
-        result.failed.push({
-          title: done.sub.title,
-          error: `merge failed: ${error instanceof Error ? error.message : String(error)}`,
-        });
+        const message = error instanceof Error ? error.message : String(error);
+        this.reportAgent(done.subId, done.sub.title, "blocked", `${done.sub.title} - merge failed`);
+        result.failed.push({ title: done.sub.title, error: `merge failed: ${message}` });
       }
     }
     return result;

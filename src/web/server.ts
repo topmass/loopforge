@@ -242,6 +242,11 @@ export function startServer(
             activeAgentStatuses: board.agentStatuses.filter((status) =>
               board.runs.some((run) => run.id === status.runId && run.status === "running")
             ),
+            // Goal-loop fan-out agents report here; show the live ones (not
+            // done, seen recently) so the board reflects both execution paths.
+            externalAgents: board.externalAgents.filter((agent) =>
+              agent.state !== "done" && Date.now() - Date.parse(agent.lastSeenAt) < 120_000
+            ),
             dispatchableTasks: store.listDispatchableTasks(50),
             needsInputTasks: board.tasks.filter((task) => task.status === "blocked"),
           });
@@ -376,7 +381,13 @@ export function startServer(
             backend: normalizeBackend(body.backend.trim(), "codex"),
           });
           broadcastActivity(
-            store.appendEvent(null, null, "system", "config", `Main backend set to ${updated.backend}.`),
+            store.appendEvent(
+              null,
+              null,
+              "system",
+              "config",
+              `Main backend set to ${updated.backend}.`,
+            ),
           );
           return json({ backend: describeBackend(updated), raw: updated.backend });
         }
@@ -1181,7 +1192,9 @@ export function startServer(
 // Serve the built React GUI from app/dist under /app, SPA-style.
 async function serveApp(pathname: string): Promise<Response> {
   const appRoot = path.normalize(path.join(APP_ROOT, "app", "dist"));
-  const rel = pathname === "/app" || pathname === "/app/" ? "index.html" : pathname.slice("/app/".length);
+  const rel = pathname === "/app" || pathname === "/app/"
+    ? "index.html"
+    : pathname.slice("/app/".length);
   const target = path.normalize(path.join(appRoot, rel));
   if (!target.startsWith(appRoot)) {
     return new Response("Not found", { status: 404 });

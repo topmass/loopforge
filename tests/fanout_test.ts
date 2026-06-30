@@ -2,8 +2,8 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { BoardStore } from "../src/board/store.ts";
 import {
   FanoutRunner,
-  findScopeConflict,
   type FanoutSubtask,
+  findScopeConflict,
   parseFanoutRequest,
   summarizeFanout,
 } from "../src/workers/fanout.ts";
@@ -83,7 +83,10 @@ class TitleAwareSubClient implements CodexClient {
   async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
     const title = input.title.split(": ").pop() ?? "";
     const isApi = title.includes("api");
-    await Deno.writeTextFile(`${session.cwd}/${isApi ? "api.txt" : "ui.txt"}`, isApi ? "api\n" : "ui\n");
+    await Deno.writeTextFile(
+      `${session.cwd}/${isApi ? "api.txt" : "ui.txt"}`,
+      isApi ? "api\n" : "ui\n",
+    );
     this.onEvent({
       taskId: null,
       runId: null,
@@ -136,6 +139,14 @@ Deno.test("FanoutRunner runs disjoint subtasks in parallel worktrees and merges 
     assert(events.some((e) => e.includes("subagent.spawned")));
     assert(events.some((e) => e.includes("subagent.merged")));
     assertStringIncludes(summarizeFanout(result), "merged 2 subtask");
+
+    // Each fan-out agent mirrored its lifecycle onto the board, ending merged,
+    // so the goal-loop path shows up on the Kanban like dispatcher tasks.
+    const external = store.listExternalAgents();
+    assertEquals(external.length, 2);
+    assert(external.every((agent) => agent.state === "done"), JSON.stringify(external));
+    assert(external.some((agent) => agent.agent === "api"));
+    assert(external.some((agent) => agent.agent === "ui"));
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });
