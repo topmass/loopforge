@@ -72,6 +72,36 @@ export interface BoardSnapshot {
   events: ActivityEvent[];
 }
 
+export type AgentPhase =
+  | "starting"
+  | "planning"
+  | "reading"
+  | "editing"
+  | "running"
+  | "testing"
+  | "reviewing"
+  | "merging"
+  | "blocked"
+  | "done";
+
+export type AgentRisk =
+  | "none"
+  | "test_failed"
+  | "conflict"
+  | "stale"
+  | "needs_user"
+  | "session";
+
+// Serialized subset of the board's AgentStatus the strip reads to show what a
+// worker is doing right now.
+export interface AgentStatus {
+  taskId: string;
+  phase: AgentPhase;
+  headline: string;
+  detail: string;
+  risk: AgentRisk;
+}
+
 export interface Runtime {
   project?: { name: string; path: string };
   backend?: string;
@@ -81,4 +111,5 @@ export interface Runtime {
   scout?: { enabled: boolean; backend: string };
   pushBranches?: boolean;
   maxParallelAgents?: number;
+  activeAgentStatuses?: AgentStatus[];
 }
