@@ -36,19 +36,9 @@ Deno.test("a stale lease can be stolen, a fresh one cannot", () => {
     assertEquals(store.acquireLease("k", "B", 60_000, 59_000), false);
     // Past the stale window: B steals it.
     assertEquals(store.acquireLease("k", "B", 60_000, 61_000), true);
-    // A is no longer the holder, so its heartbeat and release are no-ops.
-    assertEquals(store.heartbeatLease("k", "A", 62_000), false);
+    // A is no longer the holder: its release is a no-op and B keeps the lease.
     store.releaseLease("k", "A");
-    assertEquals(store.heartbeatLease("k", "B", 63_000), true);
-  });
-});
-
-Deno.test("heartbeats keep a lease alive past the stale window", () => {
-  withStore((store) => {
-    assertEquals(store.acquireLease("k", "A", 60_000, 0), true);
-    assertEquals(store.heartbeatLease("k", "A", 50_000), true);
-    // 70_000 is >60s after acquisition but only 20s after the last heartbeat.
-    assertEquals(store.acquireLease("k", "B", 60_000, 70_000), false);
+    assertEquals(store.acquireLease("k", "C", 60_000, 62_000), false);
   });
 });
 

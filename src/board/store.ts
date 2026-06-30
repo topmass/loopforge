@@ -1816,13 +1816,6 @@ export class BoardStore {
     return Number(result.changes) > 0;
   }
 
-  heartbeatLease(key: string, holder: string, now: number = Date.now()): boolean {
-    const result = this.db.prepare(
-      "UPDATE leases SET heartbeat_at = ? WHERE key = ? AND holder = ?",
-    ).run(now, key, holder);
-    return Number(result.changes) > 0;
-  }
-
   releaseLease(key: string, holder: string): void {
     this.db.prepare("DELETE FROM leases WHERE key = ? AND holder = ?").run(key, holder);
   }

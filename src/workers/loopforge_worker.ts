@@ -1976,6 +1976,9 @@ ${result.notes}`,
     return await this.runSerialized(async () => {
       const key = `merge:${this.root}`;
       const holder = `merge-${Deno.pid}-${crypto.randomUUID()}`;
+      // ponytail: 60s lease stale-ceiling, not heartbeated during the merge - a
+      // merge that runs >60s could be stolen mid-flight. Heartbeat the lease
+      // during the hold if merges ever get that slow.
       await this.acquireLeaseBlocking(key, holder);
       try {
         return await gitMergeBranch(this.root, branchName);
