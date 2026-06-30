@@ -83,6 +83,32 @@ export async function prepareTaskWorktree(
   }
 }
 
+// Best-effort teardown after a task's branch has merged into root: remove the
+// worktree and delete its loopforge/<task> branch so long unattended runs do
+// not accumulate worktrees and branches without bound. Never throws - cleanup
+// failure must not fail an already-completed merge.
+export async function removeTaskWorktree(
+  root: string,
+  worktreePath: string,
+  branchName: string,
+): Promise<void> {
+  try {
+    await runCommand(root, ["git", "worktree", "remove", "--force", worktreePath]);
+  } catch {
+    // The worktree may already be gone; prune clears any stale metadata next.
+  }
+  try {
+    await runCommand(root, ["git", "worktree", "prune"]);
+  } catch {
+    // Best effort.
+  }
+  try {
+    await runCommand(root, ["git", "branch", "-D", branchName]);
+  } catch {
+    // The branch may not exist (PR path) or may already be deleted.
+  }
+}
+
 export async function gitStatus(cwd: string): Promise<string> {
   return await runCommand(cwd, ["git", "status", "--short"]);
 }

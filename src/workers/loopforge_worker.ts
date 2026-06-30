@@ -21,6 +21,7 @@ import {
   gitStatus,
   prepareTaskWorktree,
   PublishResult,
+  removeTaskWorktree,
 } from "./git_utils.ts";
 import { buildTriagePrompt, fingerprintBlocker, parseTriageResponse } from "./blocker_triage.ts";
 import { GoalReviewer } from "./goal_reviewer.ts";
@@ -1824,6 +1825,11 @@ ${result.notes}`,
         `Review approved and merged ${task.branchName}.`,
       ).event,
     );
+    // The branch is merged into root now; reclaim its worktree and branch so a
+    // long unattended run doesn't leak them. PR-path branches are left for the PR.
+    if (!pullRequest && task.worktreePath && task.branchName) {
+      await removeTaskWorktree(this.root, task.worktreePath, task.branchName);
+    }
     let doneTask = this.store.getTask(task.id);
     doneTask = this.store.updateTaskLoop(doneTask.id, {
       phase: "remembering",

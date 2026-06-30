@@ -1,6 +1,11 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { BoardStore } from "../src/board/store.ts";
-import { gitCommitAll, gitPublishRoot, prepareTaskWorktree } from "../src/workers/git_utils.ts";
+import {
+  gitCommitAll,
+  gitPublishRoot,
+  prepareTaskWorktree,
+  removeTaskWorktree,
+} from "../src/workers/git_utils.ts";
 
 Deno.test("worktree commits exclude agent runtime folders", async () => {
   const root = Deno.makeTempDirSync();
@@ -39,6 +44,34 @@ Deno.test("worktree preparation prunes stale task worktree metadata", async () =
     assertEquals(second.worktreePath, first.worktreePath);
     assertEquals(second.branchName, first.branchName);
     assertEquals(await git(second.worktreePath, ["status", "--short"]), "");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("removeTaskWorktree reclaims the worktree and deletes its branch", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+    const store = new BoardStore(root);
+    store.initProject();
+    const { task } = store.createGoal("Reclaim worktree after merge");
+    const assignment = await prepareTaskWorktree(root, task);
+
+    assertEquals((await Deno.stat(assignment.worktreePath)).isDirectory, true);
+    assertStringIncludes(
+      await git(root, ["branch", "--list", assignment.branchName]),
+      assignment.branchName,
+    );
+
+    await removeTaskWorktree(root, assignment.worktreePath, assignment.branchName);
+
+    await assertRejects(() => Deno.stat(assignment.worktreePath));
+    assertEquals(await git(root, ["branch", "--list", assignment.branchName]), "");
+
+    // Idempotent: tearing down an already-removed worktree is a no-op.
+    await removeTaskWorktree(root, assignment.worktreePath, assignment.branchName);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
