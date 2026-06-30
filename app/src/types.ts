@@ -102,6 +102,16 @@ export interface AgentStatus {
   risk: AgentRisk;
 }
 
+export type ExternalAgentState = "working" | "blocked" | "done" | "idle";
+
+// A goal-loop fan-out agent reporting onto the board (no dispatcher taskId).
+export interface ExternalAgentStatus {
+  id: string;
+  agent: string;
+  state: ExternalAgentState;
+  headline: string;
+}
+
 export interface Runtime {
   project?: { name: string; path: string };
   backend?: string;
@@ -112,4 +122,5 @@ export interface Runtime {
   pushBranches?: boolean;
   maxParallelAgents?: number;
   activeAgentStatuses?: AgentStatus[];
+  externalAgents?: ExternalAgentStatus[];
 }
