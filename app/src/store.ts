@@ -31,8 +31,6 @@ interface AppState {
   // Last time a goal's loop emitted activity, so the UI can show "working"
   // before the first plan.updated lands (a long first turn looks idle otherwise).
   loopActiveAt: Record<string, number>;
-  // Transient pulse events for the planet view to animate, keyed by an id.
-  pulses: { id: number; kind: string; taskId: string | null; at: number }[];
 
   setConn: (c: ConnState) => void;
   applyBoard: (b: BoardSnapshot) => void;
@@ -41,8 +39,6 @@ interface AppState {
   selectTask: (id: string | null) => void;
   setActiveGoal: (id: string | null) => void;
 }
-
-let pulseSeq = 1;
 
 export const useStore = create<AppState>((set) => ({
   conn: "connecting",
@@ -55,7 +51,6 @@ export const useStore = create<AppState>((set) => ({
   activeGoalId: null,
   selectedTaskId: null,
   loopActiveAt: {},
-  pulses: [],
 
   setConn: (conn) => set({ conn }),
 
@@ -86,19 +81,6 @@ export const useStore = create<AppState>((set) => ({
         if (lifecycle.kind === "plan.updated" && lifecycle.goalId) {
           const steps = (lifecycle.data.steps as PlanStep[]) ?? [];
           next.planByGoal = { ...state.planByGoal, [lifecycle.goalId]: steps };
-        }
-        // Subagent + status events become transient pulses for the planet view.
-        if (
-          lifecycle.kind === "subagent.spawned" ||
-          lifecycle.kind === "subagent.progress" ||
-          lifecycle.kind === "subagent.merged" ||
-          lifecycle.kind === "goal.blocked" ||
-          lifecycle.kind === "verified"
-        ) {
-          next.pulses = [
-            ...state.pulses.slice(-30),
-            { id: pulseSeq++, kind: lifecycle.kind, taskId: lifecycle.taskId, at: Date.now() },
-          ];
         }
         // Track spawned/merged subagents as persistent satellite nodes.
         if (
