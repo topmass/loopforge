@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "./store";
 import { api } from "./api";
+import { workerChips, type WorkerChip } from "./agent_status";
 import type { Goal, PlanStep } from "./types";
 
 // Shared spring - the soft, slightly bouncy motion of a calm home menu.
@@ -546,18 +547,70 @@ function planColumns(steps: PlanStep[]) {
   };
 }
 
+// Live per-task worker status the board already tracks (phase, what it's doing
+// now, risk) - the TUI showed this; the web used to drop it. Rendered whenever
+// any worker is running, regardless of whether the open goal has a plan yet.
+function ActiveWorkersStrip(
+  { chips, onSelect }: { chips: WorkerChip[]; onSelect: (taskId: string) => void },
+) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="border-b border-slate-200 px-4 py-3">
+      <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Active workers <span className="text-slate-400">{chips.length} running</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {chips.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => chip.taskId && onSelect(chip.taskId)}
+            className="flex items-center gap-2 rounded-xl border border-orange-300 bg-orange-50 px-3 py-2 text-left text-sm shadow-sm"
+          >
+            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-orange-500" />
+            <span className="font-medium text-slate-800">{chip.label}</span>
+            <span className="max-w-[32ch] truncate text-[11px] text-slate-500" title={chip.detail}>
+              {chip.detail}
+            </span>
+            {chip.tone
+              ? (
+                <span
+                  className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${chip.tone.className}`}
+                >
+                  {chip.tone.label}
+                </span>
+              )
+              : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function KanbanView({ goalId }: { goalId: string }) {
   const steps = useStore((s) => s.planByGoal[goalId]) ?? [];
   const subagents = useStore((s) => s.subagentsByGoal[goalId]) ?? [];
+  const activeWorkers = useStore((s) => s.runtime?.activeAgentStatuses) ?? [];
+  const externalAgents = useStore((s) => s.runtime?.externalAgents) ?? [];
   const probes = useStore((s) => s.board?.probes ?? []);
   const selectTask = useStore((s) => s.selectTask);
   const cols = useMemo(() => planColumns(steps), [steps]);
+  const workers = useMemo(
+    () => workerChips(activeWorkers, externalAgents),
+    [activeWorkers, externalAgents],
+  );
   const goalProbes = probes.filter((p) => p.goalId === goalId);
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
   const running = subagents.filter((s) => s.state === "running").length;
 
   if (steps.length === 0 && subagents.length === 0) {
-    return <IdlePlan goalId={goalId} />;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
+        <IdlePlan goalId={goalId} />
+      </div>
+    );
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -566,6 +619,7 @@ function KanbanView({ goalId }: { goalId: string }) {
           Win conditions: {passed}/{goalProbes.length} passing
         </div>
       )}
+      <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
       {/* Parallel sub-agents as a live strip - lit while coding, calm when merged. */}
       {subagents.length > 0 && (
         <div className="border-b border-slate-200 px-4 py-3">

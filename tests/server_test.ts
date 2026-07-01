@@ -143,6 +143,97 @@ Deno.test("server deletes a started task with a stale running run", async () => 
   }
 });
 
+Deno.test("server runtime exposes active worker status for the live strip", async () => {
+  const root = Deno.makeTempDirSync();
+  const boot = new BoardStore(root);
+  boot.initProject();
+  boot.close();
+
+  const port = 49433 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    // Seed a running worker AFTER boot: startServer's recoverStaleRuns fails any
+    // pre-existing running run on startup (it assumes a crash), so seeding
+    // earlier would be wiped before the first read.
+    const store = new BoardStore(root);
+    let taskId = "";
+    try {
+      const { task } = store.createGoal("Surface active workers");
+      taskId = task.id;
+      const run = store.createRun(task.id, "worker");
+      store.upsertAgentStatus({
+        taskId: task.id,
+        runId: run.id,
+        phase: "editing",
+        headline: "Editing handler.ts",
+        detail: "Applying the patch.",
+        risk: "test_failed",
+      });
+    } finally {
+      store.close();
+    }
+
+    const runtime = await fetch(`${server.url}/api/runtime`).then((response) => response.json());
+    // The web "Active workers" strip renders exactly these fields.
+    assertEquals(runtime.activeAgentStatuses.length, 1);
+    const worker = runtime.activeAgentStatuses[0];
+    assertEquals(worker.taskId, taskId);
+    assertEquals(worker.phase, "editing");
+    assertEquals(worker.headline, "Editing handler.ts");
+    assertEquals(worker.risk, "test_failed");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("server runtime exposes live fan-out agents and hides finished ones", async () => {
+  const root = Deno.makeTempDirSync();
+  const boot = new BoardStore(root);
+  boot.initProject();
+  boot.close();
+
+  const port = 49533 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const store = new BoardStore(root);
+    try {
+      // A goal-loop fan-out agent reports onto the board the same way the
+      // dispatcher tasks do, so the Kanban shows both paths.
+      store.reportExternalAgent({
+        id: "GOAL-1-0",
+        agent: "Repair merge race",
+        state: "working",
+        headline: "Working: repair merge race",
+      });
+      store.reportExternalAgent({
+        id: "GOAL-1-1",
+        agent: "Finished subtask",
+        state: "done",
+        headline: "merged",
+      });
+    } finally {
+      store.close();
+    }
+
+    const runtime = await fetch(`${server.url}/api/runtime`).then((response) => response.json());
+    // Only the live agent is surfaced; the done one is filtered out.
+    assertEquals(runtime.externalAgents.length, 1);
+    assertEquals(runtime.externalAgents[0].id, "GOAL-1-0");
+    assertEquals(runtime.externalAgents[0].agent, "Repair merge race");
+    assertEquals(runtime.externalAgents[0].state, "working");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("server requests a running task stop", async () => {
   const root = Deno.makeTempDirSync();
   const port = 49133 + Math.floor(Math.random() * 300);
@@ -773,7 +864,12 @@ class LoopStubClient implements CodexClient {
       kind: "agent",
       message: "LOOP_COMPLETE",
     });
-    return { threadId: session.threadId, turnId: "loop-turn", status: "completed", completed: true };
+    return {
+      threadId: session.threadId,
+      turnId: "loop-turn",
+      status: "completed",
+      completed: true,
+    };
   }
 
   stop(): Promise<void> {

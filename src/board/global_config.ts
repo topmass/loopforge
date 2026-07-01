@@ -32,6 +32,12 @@ export interface GlobalConfig {
     enabled: boolean;
     backend: AgentBackend;
   };
+  // Review can run on a stronger backend than the execution loop: grind cheap
+  // (e.g. pi/local), then have a powerhouse model gate the merge.
+  reviewer: {
+    enabled: boolean;
+    backend: AgentBackend;
+  };
   scout: {
     enabled: boolean;
     backend: AgentBackend;
@@ -54,6 +60,7 @@ export interface GlobalConfigPatch {
   claude?: Partial<GlobalConfig["claude"]>;
   rescue?: Partial<GlobalConfig["rescue"]>;
   planner?: Partial<GlobalConfig["planner"]>;
+  reviewer?: Partial<GlobalConfig["reviewer"]>;
   scout?: Partial<GlobalConfig["scout"]>;
   search?: Partial<GlobalConfig["search"]>;
   pushBranches?: boolean;
@@ -109,6 +116,10 @@ export function defaultGlobalConfig(): GlobalConfig {
       enabled: false,
       backend: "codex",
     },
+    reviewer: {
+      enabled: false,
+      backend: "codex",
+    },
     scout: {
       enabled: false,
       backend: "codex",
@@ -152,6 +163,10 @@ export function readGlobalConfig(): GlobalConfig {
       enabled: record(parsed.planner).enabled === true,
       backend: normalizeBackend(record(parsed.planner).backend, defaults.planner.backend),
     },
+    reviewer: {
+      enabled: record(parsed.reviewer).enabled === true,
+      backend: normalizeBackend(record(parsed.reviewer).backend, defaults.reviewer.backend),
+    },
     scout: {
       enabled: record(parsed.scout).enabled === true,
       backend: normalizeBackend(record(parsed.scout).backend, defaults.scout.backend),
@@ -186,6 +201,7 @@ export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
     claude: { ...current.claude, ...patch.claude },
     rescue: { ...current.rescue, ...patch.rescue },
     planner: { ...current.planner, ...patch.planner },
+    reviewer: { ...current.reviewer, ...patch.reviewer },
     scout: { ...current.scout, ...patch.scout },
     search: { ...current.search, ...patch.search },
     pushBranches: patch.pushBranches ?? current.pushBranches,

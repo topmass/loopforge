@@ -7,7 +7,7 @@ import {
   CodexSessionOptions,
   CodexTurnResult,
 } from "./codex_app_server.ts";
-import { createAgentClient, createPlannerClient } from "./agent_backend.ts";
+import { createAgentClient, createPlannerClient, createReviewerClient } from "./agent_backend.ts";
 import { readGlobalConfig } from "../board/global_config.ts";
 import { consultRescue, RescueClientFactory } from "./rescue.ts";
 import { extractTurnId } from "./codex_event_normalizer.ts";
@@ -21,6 +21,7 @@ import {
   gitStatus,
   prepareTaskWorktree,
   PublishResult,
+  removeTaskWorktree,
 } from "./git_utils.ts";
 import { buildTriagePrompt, fingerprintBlocker, parseTriageResponse } from "./blocker_triage.ts";
 import { GoalReviewer } from "./goal_reviewer.ts";
@@ -53,6 +54,9 @@ export interface LoopForgeWorkerOptions {
   createPlannerClient?: (
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
+  createReviewerClient?: (
+    onEvent: (event: ActivityEventInput) => void,
+  ) => CodexClient;
   createRescueClient?: RescueClientFactory;
   pullRequestGate?: PullRequestGate;
 }
@@ -71,6 +75,9 @@ export class LoopForgeWorker {
   readonly createPlannerClient: (
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
+  readonly createReviewerClient: (
+    onEvent: (event: ActivityEventInput) => void,
+  ) => CodexClient;
   readonly pullRequestGate: PullRequestGate;
   readonly runMode: RunMode;
   private readonly createRescueClient?: RescueClientFactory;
@@ -84,6 +91,8 @@ export class LoopForgeWorker {
       ((onEvent) => createAgentClient(this.root, onEvent));
     this.createPlannerClient = options.createPlannerClient ?? options.createCodexClient ??
       ((onEvent) => createPlannerClient(this.root, onEvent));
+    this.createReviewerClient = options.createReviewerClient ?? options.createCodexClient ??
+      ((onEvent) => createReviewerClient(this.root, onEvent));
     this.createRescueClient = options.createRescueClient;
     this.pullRequestGate = options.pullRequestGate ?? new GhPullRequestGate(this.root);
     this.runMode = options.runMode ?? "attended";
@@ -1583,7 +1592,7 @@ export class LoopForgeWorker {
     });
     const reviewer = new GoalReviewer(this.root, {
       runMode: this.runMode,
-      createCodexClient: this.createCodexClient,
+      createCodexClient: this.createReviewerClient,
       onEvent: (event) => {
         if (shouldRecordActivity(event)) {
           this.emit(
@@ -1816,6 +1825,11 @@ ${result.notes}`,
         `Review approved and merged ${task.branchName}.`,
       ).event,
     );
+    // The branch is merged into root now; reclaim its worktree and branch so a
+    // long unattended run doesn't leak them. PR-path branches are left for the PR.
+    if (!pullRequest && task.worktreePath && task.branchName) {
+      await removeTaskWorktree(this.root, task.worktreePath, task.branchName);
+    }
     let doneTask = this.store.getTask(task.id);
     doneTask = this.store.updateTaskLoop(doneTask.id, {
       phase: "remembering",
@@ -1956,7 +1970,32 @@ ${result.notes}`,
   }
 
   private async mergeBranch(branchName: string): Promise<string> {
-    return await this.runSerialized(() => gitMergeBranch(this.root, branchName));
+    // runSerialized orders merges within this process; the board lease orders
+    // them across separate LoopForge processes sharing this root, so two
+    // workers never run `git merge` into the same repo at once.
+    return await this.runSerialized(async () => {
+      const key = `merge:${this.root}`;
+      const holder = `merge-${Deno.pid}-${crypto.randomUUID()}`;
+      // ponytail: 60s lease stale-ceiling, not heartbeated during the merge - a
+      // merge that runs >60s could be stolen mid-flight. Heartbeat the lease
+      // during the hold if merges ever get that slow.
+      await this.acquireLeaseBlocking(key, holder);
+      try {
+        return await gitMergeBranch(this.root, branchName);
+      } finally {
+        this.store.releaseLease(key, holder);
+      }
+    });
+  }
+
+  private async acquireLeaseBlocking(key: string, holder: string): Promise<void> {
+    const deadlineAt = Date.now() + 60_000;
+    while (!this.store.acquireLease(key, holder)) {
+      if (Date.now() >= deadlineAt) {
+        throw new Error(`Timed out waiting for the ${key} lease.`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
   }
 
   private async runHooks(
