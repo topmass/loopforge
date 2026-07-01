@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { BoardStore } from "../src/board/store.ts";
 import { GoalLoopRunner } from "../src/workers/goal_loop.ts";
 import { LoopForgeWorker } from "../src/workers/loopforge_worker.ts";
@@ -22,9 +22,31 @@ async function git(root: string, args: string[]): Promise<void> {
   }
 }
 
+async function gitOutput(root: string, args: string[]): Promise<string> {
+  const output = await new Deno.Command("git", {
+    args,
+    cwd: root,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!output.success) {
+    throw new Error(new TextDecoder().decode(output.stderr));
+  }
+  return new TextDecoder().decode(output.stdout);
+}
+
 async function seedRepo(root: string): Promise<void> {
   await git(root, ["init", "-b", "main"]);
-  await git(root, ["-c", "user.email=t@t", "-c", "user.name=T", "commit", "--allow-empty", "-m", "seed"]);
+  await git(root, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=T",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "seed",
+  ]);
 }
 
 type TurnScript = (cwd: string, turn: number) => Promise<string>;
@@ -251,6 +273,78 @@ Deno.test("goal loop nudges once on a stall then stops cleanly", async () => {
   }
 });
 
+Deno.test("goal loop nudges the owner to fan out independent plan items once", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Build three independent parts");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 4,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd, turn) => {
+          // Three unchecked items every turn, and no fan-out request.
+          await Deno.writeTextFile(
+            `${cwd}/LOOP_PLAN.md`,
+            "# Plan\n- [ ] Build the API\n- [ ] Build the UI\n- [ ] Write the docs\n",
+          );
+          // A distinct file each turn keeps the loop progressing (no stall) so it
+          // runs long enough to prove the nudge is one-shot.
+          await Deno.writeTextFile(`${cwd}/step-${turn}.txt`, `${turn}\n`);
+          return "Working the first item.";
+        });
+        return client;
+      },
+    });
+    await runner.run(goal.id);
+    assert(client!.turns >= 3, `expected 3+ turns, ran ${client!.turns}`);
+    // Turn 1 requested no fan-out, so turn 2 carries the deterministic nudge.
+    assertStringIncludes(client!.prompts[1], "delegate them NOW");
+    // One-shot: exactly one prompt across the run carries the nudge.
+    const nudged = client!.prompts.filter((prompt) => prompt.includes("delegate them NOW"));
+    assertEquals(nudged.length, 1);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop reclaims its worktree and branch after a merged completion", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Ship and reclaim");
+    const worktreePath = `${root}/.loopforge/worktrees/${goal.id}`;
+    const branch = `loopforge/${goal.id.toLowerCase()}`;
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) =>
+        new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [x] Ship it -- done\n");
+          await Deno.writeTextFile(`${cwd}/ship.txt`, "ship\n");
+          return "LOOP_COMPLETE";
+        }),
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "merged");
+    // The goal's own loop worktree and branch are reclaimed after the merge.
+    await assertRejects(() => Deno.stat(worktreePath));
+    assertEquals((await gitOutput(root, ["branch", "--list", branch])).trim(), "");
+    // The stored loop state was cleared so the GUI never points at a deleted path.
+    assertEquals(store.getGoal(goal.id).loopWorktree, null);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("goal loop does a graceful wrap-up turn on the iteration budget", async () => {
   const root = Deno.makeTempDirSync();
   await seedRepo(root);
@@ -379,7 +473,10 @@ class FanoutLoopClient implements CodexClient {
     if (isOwner) {
       this.ownerTurns++;
       if (this.ownerTurns === 1) {
-        await Deno.writeTextFile(`${session.cwd}/LOOP_PLAN.md`, "# Plan\n- [~] Build both halves\n");
+        await Deno.writeTextFile(
+          `${session.cwd}/LOOP_PLAN.md`,
+          "# Plan\n- [~] Build both halves\n",
+        );
         reply = `Splitting the work.
 LOOP_FANOUT
 {"subtasks":[

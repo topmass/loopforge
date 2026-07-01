@@ -19,8 +19,9 @@ import { collectAgentsInstructions } from "./project_context.ts";
 import {
   ensureGitRepository,
   gitCommitAll,
-  gitMergeBranch,
+  gitMergeBranchLeased,
   prepareGoalWorktree,
+  removeTaskWorktree,
   runCommand,
 } from "./git_utils.ts";
 import { probeLights, runGoalProbes } from "./goal_probes.ts";
@@ -121,6 +122,7 @@ export class GoalLoopRunner {
       let session = await this.openLoopSession(codex, goalId, assignment.worktreePath);
       let lastFingerprint = "";
       let stalls = 0;
+      let fanoutNudged = false;
       let probeFeedback = "";
       let lastObjective = goal.text;
       for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -128,14 +130,13 @@ export class GoalLoopRunner {
         // last allowed iteration), do ONE graceful wrap-up turn - commit what
         // exists and record remaining work - instead of cutting hard.
         const budget = this.options.tokenBudget;
-        const wrapUp: "time" | "tokens" | "iterations" | null =
-          budget && tokensUsed >= budget
-            ? "tokens"
-            : Date.now() >= deadline
-            ? "time"
-            : iteration === maxIterations
-            ? "iterations"
-            : null;
+        const wrapUp: "time" | "tokens" | "iterations" | null = budget && tokensUsed >= budget
+          ? "tokens"
+          : Date.now() >= deadline
+          ? "time"
+          : iteration === maxIterations
+          ? "iterations"
+          : null;
         // objective-updated: if the goal text changed mid-run, tell the agent.
         const currentObjective = this.store.getGoal(goalId).text;
         const objectiveChanged = currentObjective !== lastObjective;
@@ -144,7 +145,9 @@ export class GoalLoopRunner {
         this.emitEvent(
           goalId,
           "iteration",
-          `Loop iteration ${iteration}/${maxIterations} started.${wrapUp ? ` (wrap-up: ${wrapUp})` : ""}`,
+          `Loop iteration ${iteration}/${maxIterations} started.${
+            wrapUp ? ` (wrap-up: ${wrapUp})` : ""
+          }`,
         );
         responseText = "";
         const planExists = await this.planFileExists(assignment.worktreePath);
@@ -275,9 +278,7 @@ export class GoalLoopRunner {
             `Win conditions are not green yet (${summary.passed}/${summary.total} ${
               probeLights(this.store.listProbes(goalId))
             }). Failing probes:`,
-            ...failing.map((result) =>
-              `- ${result.probe.label}: ${result.output.slice(0, 300)}`
-            ),
+            ...failing.map((result) => `- ${result.probe.label}: ${result.output.slice(0, 300)}`),
             "Add plan items for these failures and keep working; do not declare " +
             "completion until they pass.",
           ].join("\n");
@@ -287,6 +288,22 @@ export class GoalLoopRunner {
             `Completion claimed but win conditions ${summary.passed}/${summary.total}; continuing.`,
           );
           continue;
+        }
+
+        // Reaching here means no fan-out was requested this turn (every fan-out
+        // path continues earlier). Nudge once when the plan still holds two or
+        // more independent items so the owner delegates instead of grinding
+        // them one per turn.
+        const todoCount = items.filter((item) => item.status === "todo").length;
+        if (!fanoutNudged && todoCount >= 2) {
+          fanoutNudged = true;
+          probeFeedback =
+            `Your plan still has ${todoCount} unchecked items. If two or more touch different files or areas, delegate them NOW with ${LOOP_FANOUT_TOKEN} and disjoint write scopes instead of working them one per turn. If they truly must be serial, say why in one line and continue.`;
+          this.emitEvent(
+            goalId,
+            "steer",
+            `Nudged the loop to fan out ${todoCount} independent plan items.`,
+          );
         }
 
         const head = commit ??
@@ -357,7 +374,7 @@ export class GoalLoopRunner {
     }
     let output: string;
     try {
-      output = await gitMergeBranch(this.root, branchName);
+      output = await gitMergeBranchLeased(this.store, this.root, branchName);
     } catch (error) {
       // The work is done and proven; a merge conflict parks it instead of
       // crashing the loop. Restarting the hold task retries the merge.
@@ -397,6 +414,15 @@ export class GoalLoopRunner {
       summary: `${evidence} Merged ${branchName}.`,
       data: { branch: branchName, iterations },
     }));
+    // Merge landed and the goal is closed, so its own loop worktree + branch are
+    // spent. Reclaim them (best-effort) and clear the stored loop state so the
+    // GUI never points at a deleted path; long runs would otherwise accumulate
+    // one worktree + branch per finished goal.
+    const worktree = this.store.getGoal(goalId).loopWorktree;
+    if (worktree) {
+      await removeTaskWorktree(this.root, worktree, branchName);
+      this.store.setGoalLoopState(goalId, { threadId: null, branch: null, worktree: null });
+    }
     return this.finish(goalId, iterations, "merged", `${evidence} Merged ${branchName}.`);
   }
 
@@ -435,7 +461,11 @@ constraints). Be concise - a short numbered list. Do NOT create or edit any file
 plan yet. End your reply with a line containing only: LOOP_QUESTIONS`;
   }
 
-  private buildFirstPrompt(goal: Goal, projectInstructions: string, addedTasks: string[] = []): string {
+  private buildFirstPrompt(
+    goal: Goal,
+    projectInstructions: string,
+    addedTasks: string[] = [],
+  ): string {
     const probes = this.store.listProbes(goal.id);
     const addedBlock = addedTasks.length
       ? `\nAdditional tasks the user attached to this goal - include each as a plan item:\n${
@@ -450,7 +480,11 @@ ${goal.text}
 ${addedBlock}
 
 Win conditions (LoopForge runs these for real; the goal only closes when they pass):
-${probes.length ? probes.map((probe) => `- ${probe.label}: ${probe.command}`).join("\n") : "- none recorded; your evidence notes carry the proof."}
+${
+      probes.length
+        ? probes.map((probe) => `- ${probe.label}: ${probe.command}`).join("\n")
+        : "- none recorded; your evidence notes carry the proof."
+    }
 
 Project context from the original folder:
 ${projectInstructions}
@@ -482,7 +516,9 @@ pieces share files.`;
       }\n`
       : "";
     const objectiveBlock = steer.objectiveChanged
-      ? `\nThe goal objective was edited. Re-read it and reconcile ${LOOP_PLAN_FILE} with the new objective:\n${steer.objective ?? ""}\n`
+      ? `\nThe goal objective was edited. Re-read it and reconcile ${LOOP_PLAN_FILE} with the new objective:\n${
+        steer.objective ?? ""
+      }\n`
       : "";
     if (steer.wrapUp) {
       return `The ${steer.wrapUp} budget for this run is spent. This is your final turn.

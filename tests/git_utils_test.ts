@@ -2,10 +2,36 @@ import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { BoardStore } from "../src/board/store.ts";
 import {
   gitCommitAll,
+  gitMergeBranchLeased,
   gitPublishRoot,
+  LeaseStore,
   prepareTaskWorktree,
   removeTaskWorktree,
 } from "../src/workers/git_utils.ts";
+
+// Records the acquire/release sequence so tests can prove the lease brackets the
+// merge; acquireLease always grants so the happy/conflict paths reach the merge.
+class RecordingLeaseStore implements LeaseStore {
+  readonly calls: string[] = [];
+  acquireLease(_key: string, _holder: string): boolean {
+    this.calls.push("acquire");
+    return true;
+  }
+  releaseLease(_key: string, _holder: string): void {
+    this.calls.push("release");
+  }
+}
+
+// Never grants the lease, so the helper spins until it times out.
+class BlockedLeaseStore implements LeaseStore {
+  released = false;
+  acquireLease(_key: string, _holder: string): boolean {
+    return false;
+  }
+  releaseLease(_key: string, _holder: string): void {
+    this.released = true;
+  }
+}
 
 Deno.test("worktree commits exclude agent runtime folders", async () => {
   const root = Deno.makeTempDirSync();
@@ -175,6 +201,82 @@ Deno.test("gitPublishRoot fails clearly without an origin remote", async () => {
       Error,
       "No 'origin' remote is configured",
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gitMergeBranchLeased merges under the lease and releases after", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await git(root, ["commit", "--allow-empty", "-m", "base"]);
+    await git(root, ["checkout", "-b", "feature"]);
+    await Deno.writeTextFile(`${root}/feature.txt`, "feature\n");
+    await git(root, ["add", "feature.txt"]);
+    await git(root, ["commit", "-m", "feature work"]);
+    await git(root, ["checkout", "main"]);
+    await Deno.writeTextFile(`${root}/main.txt`, "main\n");
+    await git(root, ["add", "main.txt"]);
+    await git(root, ["commit", "-m", "main work"]);
+
+    const store = new RecordingLeaseStore();
+    const output = await gitMergeBranchLeased(store, root, "feature");
+
+    assertStringIncludes(output, "feature.txt");
+    assertEquals((await Deno.stat(`${root}/feature.txt`)).isFile, true);
+    // Acquired before merging, released after - even though nothing failed.
+    assertEquals(store.calls, ["acquire", "release"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gitMergeBranchLeased times out without merging when the lease is held", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await git(root, ["commit", "--allow-empty", "-m", "base"]);
+    await git(root, ["checkout", "-b", "feature"]);
+    await Deno.writeTextFile(`${root}/feature.txt`, "feature\n");
+    await git(root, ["add", "feature.txt"]);
+    await git(root, ["commit", "-m", "feature work"]);
+    await git(root, ["checkout", "main"]);
+
+    const store = new BlockedLeaseStore();
+    await assertRejects(
+      () => gitMergeBranchLeased(store, root, "feature", { timeoutMs: 300, pollMs: 50 }),
+      Error,
+      `Timed out waiting for the merge:${root} lease.`,
+    );
+    // Never acquired, so never merged and never released.
+    assertEquals(store.released, false);
+    await assertRejects(() => Deno.stat(`${root}/feature.txt`));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gitMergeBranchLeased releases the lease when the merge conflicts", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await Deno.writeTextFile(`${root}/shared.txt`, "base\n");
+    await git(root, ["add", "shared.txt"]);
+    await git(root, ["commit", "-m", "base"]);
+    await git(root, ["checkout", "-b", "feature"]);
+    await Deno.writeTextFile(`${root}/shared.txt`, "feature\n");
+    await git(root, ["add", "shared.txt"]);
+    await git(root, ["commit", "-m", "feature edit"]);
+    await git(root, ["checkout", "main"]);
+    await Deno.writeTextFile(`${root}/shared.txt`, "main\n");
+    await git(root, ["add", "shared.txt"]);
+    await git(root, ["commit", "-m", "main edit"]);
+
+    const store = new RecordingLeaseStore();
+    await assertRejects(() => gitMergeBranchLeased(store, root, "feature"), Error);
+    // The failed merge still released the lease in the finally block.
+    assertEquals(store.calls, ["acquire", "release"]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

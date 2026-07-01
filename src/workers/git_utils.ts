@@ -371,6 +371,41 @@ export async function gitMergeBranch(root: string, branchName: string): Promise<
   ]);
 }
 
+// Structural subset of BoardStore that a merge lease needs - lets both the
+// dispatcher worker and the goal loop serialize merges into a shared root
+// across separate LoopForge processes without importing the whole store.
+export interface LeaseStore {
+  acquireLease(key: string, holder: string): boolean;
+  releaseLease(key: string, holder: string): void;
+}
+
+// Serialize `git merge` into `root` across separate LoopForge processes that
+// share it, so two workers never merge into the same repo at once.
+// ponytail: 60s lease stale-ceiling, not heartbeated during the merge - a merge
+// that runs >60s could be stolen mid-flight. Heartbeat the lease during the hold
+// if merges ever get that slow.
+export async function gitMergeBranchLeased(
+  store: LeaseStore,
+  root: string,
+  branchName: string,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<string> {
+  const key = `merge:${root}`;
+  const holder = `merge-${Deno.pid}-${crypto.randomUUID()}`;
+  const deadlineAt = Date.now() + (opts.timeoutMs ?? 60_000);
+  while (!store.acquireLease(key, holder)) {
+    if (Date.now() >= deadlineAt) {
+      throw new Error(`Timed out waiting for the ${key} lease.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, opts.pollMs ?? 150));
+  }
+  try {
+    return await gitMergeBranch(root, branchName);
+  } finally {
+    store.releaseLease(key, holder);
+  }
+}
+
 export async function ensureGitRepository(root: string): Promise<string[]> {
   const actions: string[] = [];
   // The project must be its OWN git repo root. If it merely sits INSIDE a larger
