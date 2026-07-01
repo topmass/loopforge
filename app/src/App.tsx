@@ -543,7 +543,9 @@ function planColumns(steps: PlanStep[]) {
   return {
     todo: steps.filter((s) => s.status === "todo"),
     doing: steps.filter((s) => s.status === "doing"),
-    done: steps.filter((s) => s.status === "done"),
+    // Plan items append at the bottom of LOOP_PLAN.md, so file order is oldest
+    // first; the Done column reads newest first.
+    done: steps.filter((s) => s.status === "done").reverse(),
   };
 }
 
