@@ -223,10 +223,15 @@ export class FanoutRunner {
         // Enforce the declared write scope before committing: gitCommitAll would
         // otherwise commit everything in the worktree, so revert anything the
         // sub-agent touched outside its scope and keep only in-scope work.
+        // -uall lists every untracked FILE individually; without it porcelain
+        // collapses a new nested path to its top-most untracked dir ("sites/"),
+        // which fails to match a deeper scope like sites/welcome/** and gets
+        // in-scope work reverted as a false positive.
         const statusOut = await runCommand(assignment.worktreePath, [
           "git",
           "status",
           "--porcelain",
+          "--untracked-files=all",
         ]);
         const changedFiles = statusOut.split(/\r?\n/)
           .filter((line) => line.trim().length > 0)

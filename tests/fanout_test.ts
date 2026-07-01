@@ -457,3 +457,77 @@ Deno.test("FanoutRunner fails a zero-change subtask instead of merging it", asyn
     await Deno.remove(root, { recursive: true });
   }
 });
+
+// Writes an in-scope file whose parent directories are entirely new - the
+// exact shape a live run tripped on: porcelain without -uall collapses it to
+// "sites/" and scope enforcement falsely reverts the work.
+class NestedNewDirSubClient implements CodexClient {
+  constructor(
+    private readonly onEvent: (
+      e: {
+        taskId: string | null;
+        runId: string | null;
+        role: string;
+        kind: string;
+        message: string;
+      },
+    ) => void,
+  ) {}
+  startSession(cwd: string, _o: CodexSessionOptions = {}): Promise<CodexSession> {
+    return Promise.resolve({ threadId: "t", cwd });
+  }
+  resumeSession(cwd: string, id: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId: id, cwd });
+  }
+  async runTurn(session: CodexSession, _input: CodexTurnInput): Promise<CodexTurnResult> {
+    await Deno.mkdir(`${session.cwd}/sites/welcome`, { recursive: true });
+    await Deno.writeTextFile(`${session.cwd}/sites/welcome/index.html`, "<h1>OpenQuick</h1>\n");
+    this.onEvent({ taskId: null, runId: null, role: "codex", kind: "agent", message: "built" });
+    return { threadId: session.threadId, turnId: "t", status: "completed", completed: true };
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("FanoutRunner keeps in-scope work inside a brand-new parent directory", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=T",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "seed",
+  ]);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Nested scope work");
+    const runner = new FanoutRunner(root, store, {
+      maxConcurrency: 1,
+      projectInstructions: "none",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => new NestedNewDirSubClient(onEvent),
+    });
+    const result = await runner.run(goal.id, "main", root, [
+      {
+        title: "build welcome",
+        instruction: "write the page",
+        writeScope: ["sites/welcome/**"],
+      },
+    ]);
+    assertEquals(result.failed.length, 0, JSON.stringify(result.failed));
+    assertEquals(result.merged.length, 1);
+    assertEquals(
+      await Deno.readTextFile(`${root}/sites/welcome/index.html`),
+      "<h1>OpenQuick</h1>\n",
+    );
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
