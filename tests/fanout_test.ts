@@ -5,6 +5,7 @@ import {
   type FanoutSubtask,
   findScopeConflict,
   parseFanoutRequest,
+  scopeViolations,
   summarizeFanout,
 } from "../src/workers/fanout.ts";
 import type {
@@ -194,5 +195,265 @@ Deno.test("FanoutRunner pushes sub-agent branches to origin when enabled", async
     store.close();
     await Deno.remove(root, { recursive: true });
     await Deno.remove(remote, { recursive: true });
+  }
+});
+
+Deno.test("scopeViolations returns only files no scope covers", () => {
+  // In-scope under a prefix glob, and a file equal to the prefix itself.
+  assertEquals(
+    scopeViolations(["src/api/handlers.ts", "app.py"], ["src/api/**", "app.py"]),
+    [],
+  );
+  // Out-of-scope file is flagged; the in-scope sibling is kept out of the list.
+  assertEquals(
+    scopeViolations(["src/api/x.ts", "src/ui/y.ts"], ["src/api/**"]),
+    ["src/ui/y.ts"],
+  );
+  // A bare "**" scope reduces to an empty prefix that covers everything.
+  assertEquals(scopeViolations(["anything/at/all.ts"], ["**"]), []);
+});
+
+// Writes "<title>.txt" into its worktree, where <title> is the sub-agent title.
+class NamedFileSubClient implements CodexClient {
+  constructor(
+    private readonly onEvent: (
+      e: {
+        taskId: string | null;
+        runId: string | null;
+        role: string;
+        kind: string;
+        message: string;
+      },
+    ) => void,
+  ) {}
+  startSession(cwd: string, _o: CodexSessionOptions = {}): Promise<CodexSession> {
+    return Promise.resolve({ threadId: "t", cwd });
+  }
+  resumeSession(cwd: string, id: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId: id, cwd });
+  }
+  async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    const title = input.title.split(": ").pop() ?? "";
+    await Deno.writeTextFile(`${session.cwd}/${title}.txt`, `${title}\n`);
+    this.onEvent({
+      taskId: null,
+      runId: null,
+      role: "codex",
+      kind: "agent",
+      message: `${title} done`,
+    });
+    return { threadId: session.threadId, turnId: "t", status: "completed", completed: true };
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+async function worktreeList(root: string): Promise<string> {
+  const out = await new Deno.Command("git", {
+    args: ["worktree", "list"],
+    cwd: root,
+    stdout: "piped",
+  })
+    .output();
+  return new TextDecoder().decode(out.stdout);
+}
+
+Deno.test("FanoutRunner survives a second round on the same goal and reclaims worktrees", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=T",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "seed",
+  ]);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Two rounds");
+    const runner = new FanoutRunner(root, store, {
+      maxConcurrency: 1,
+      projectInstructions: "none",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => new NamedFileSubClient(onEvent),
+    });
+
+    const round1 = await runner.run(goal.id, "main", root, [
+      { title: "round1", instruction: "write round1.txt", writeScope: ["round1.txt"] },
+    ]);
+    assertEquals(round1.failed.length, 0, JSON.stringify(round1.failed));
+    assertEquals(round1.merged.length, 1);
+    assertEquals(await Deno.readTextFile(`${root}/round1.txt`), "round1\n");
+    // The merged sub-worktree was reclaimed, so none linger for the next round.
+    assert(!(await worktreeList(root)).includes("fanout-"), await worktreeList(root));
+
+    // Second round, SAME goalId: the old bug reused subId "goal-0" and died with
+    // "cannot force update the branch". Unique per-run tags must let it pass.
+    const round2 = await runner.run(goal.id, "main", root, [
+      { title: "round2", instruction: "write round2.txt", writeScope: ["round2.txt"] },
+    ]);
+    assertEquals(round2.failed.length, 0, JSON.stringify(round2.failed));
+    assertEquals(round2.merged.length, 1);
+    assertEquals(await Deno.readTextFile(`${root}/round2.txt`), "round2\n");
+    assertEquals(await Deno.readTextFile(`${root}/round1.txt`), "round1\n");
+    assert(!(await worktreeList(root)).includes("fanout-"), await worktreeList(root));
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+// Writes one in-scope file (keep.txt) and one out-of-scope file (sneak.txt).
+class OutOfScopeSubClient implements CodexClient {
+  constructor(
+    private readonly onEvent: (
+      e: {
+        taskId: string | null;
+        runId: string | null;
+        role: string;
+        kind: string;
+        message: string;
+      },
+    ) => void,
+  ) {}
+  startSession(cwd: string, _o: CodexSessionOptions = {}): Promise<CodexSession> {
+    return Promise.resolve({ threadId: "t", cwd });
+  }
+  resumeSession(cwd: string, id: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId: id, cwd });
+  }
+  async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    await Deno.writeTextFile(`${session.cwd}/keep.txt`, "keep\n");
+    await Deno.writeTextFile(`${session.cwd}/sneak.txt`, "sneak\n");
+    // Porcelain reports a fully-untracked directory as one "sneakdir/" entry;
+    // reverting it exercises the recursive remove path.
+    await Deno.mkdir(`${session.cwd}/sneakdir`);
+    await Deno.writeTextFile(`${session.cwd}/sneakdir/inner.txt`, "sneak\n");
+    this.onEvent({ taskId: null, runId: null, role: "codex", kind: "agent", message: "did work" });
+    return { threadId: session.threadId, turnId: "t", status: "completed", completed: true };
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("FanoutRunner reverts out-of-scope writes and notes them in the summary", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=T",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "seed",
+  ]);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Scoped work");
+    const runner = new FanoutRunner(root, store, {
+      maxConcurrency: 1,
+      projectInstructions: "none",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => new OutOfScopeSubClient(onEvent),
+    });
+    const result = await runner.run(goal.id, "main", root, [
+      { title: "scoped", instruction: "only touch keep.txt", writeScope: ["keep.txt"] },
+    ]);
+    assertEquals(result.failed.length, 0, JSON.stringify(result.failed));
+    assertEquals(result.merged.length, 1);
+    assertEquals(await Deno.readTextFile(`${root}/keep.txt`), "keep\n");
+    // The out-of-scope file never reached the merged loop branch.
+    const sneakExists = await Deno.stat(`${root}/sneak.txt`).then(() => true).catch(() => false);
+    assert(!sneakExists);
+    const sneakDirExists = await Deno.stat(`${root}/sneakdir`).then(() => true).catch(() => false);
+    assert(!sneakDirExists);
+    assertStringIncludes(result.merged[0].summary, "reverted out-of-scope changes: sneak.txt");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+// Produces no file changes at all.
+class NoopSubClient implements CodexClient {
+  constructor(
+    private readonly onEvent: (
+      e: {
+        taskId: string | null;
+        runId: string | null;
+        role: string;
+        kind: string;
+        message: string;
+      },
+    ) => void,
+  ) {}
+  startSession(cwd: string, _o: CodexSessionOptions = {}): Promise<CodexSession> {
+    return Promise.resolve({ threadId: "t", cwd });
+  }
+  resumeSession(cwd: string, id: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId: id, cwd });
+  }
+  runTurn(session: CodexSession, _input: CodexTurnInput): Promise<CodexTurnResult> {
+    this.onEvent({
+      taskId: null,
+      runId: null,
+      role: "codex",
+      kind: "agent",
+      message: "nothing to do",
+    });
+    return Promise.resolve({
+      threadId: session.threadId,
+      turnId: "t",
+      status: "completed",
+      completed: true,
+    });
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("FanoutRunner fails a zero-change subtask instead of merging it", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=T",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "seed",
+  ]);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("No work");
+    const runner = new FanoutRunner(root, store, {
+      maxConcurrency: 1,
+      projectInstructions: "none",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => new NoopSubClient(onEvent),
+    });
+    const result = await runner.run(goal.id, "main", root, [
+      { title: "idle", instruction: "do nothing", writeScope: ["idle.txt"] },
+    ]);
+    assertEquals(result.merged.length, 0);
+    assertEquals(result.failed.length, 1);
+    assertEquals(result.failed[0].title, "idle");
+    assertStringIncludes(result.failed[0].error, "produced no file changes");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
   }
 });

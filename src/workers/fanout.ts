@@ -5,10 +5,18 @@
 // write-scope contract - lifted from Codex's spawn_agent guidance - is the core
 // safety invariant: enforced here, not just requested.
 
+import path from "node:path";
 import { ActivityEvent, ActivityEventInput, ExternalAgentState } from "../board/types.ts";
 import { BoardStore } from "../board/store.ts";
 import { CodexClient } from "./codex_app_server.ts";
-import { gitCommitAll, gitMergeBranch, gitPushBranch, prepareFanoutWorktree } from "./git_utils.ts";
+import {
+  gitCommitAll,
+  gitMergeBranch,
+  gitPushBranch,
+  prepareFanoutWorktree,
+  removeTaskWorktree,
+  runCommand,
+} from "./git_utils.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
 
 export const LOOP_FANOUT_TOKEN = "LOOP_FANOUT";
@@ -98,6 +106,18 @@ function scopePrefix(glob: string): string {
   return base.replace(/\/+$/, "");
 }
 
+// The files a sub-agent changed that no declared scope covers. A bare "**"
+// scope reduces to an empty prefix that covers everything; otherwise a file is
+// covered when it equals the prefix or sits under it.
+export function scopeViolations(files: string[], writeScope: string[]): string[] {
+  return files.filter((file) =>
+    !writeScope.some((glob) => {
+      const prefix = scopePrefix(glob);
+      return prefix === "" || file === prefix || file.startsWith(`${prefix}/`);
+    })
+  );
+}
+
 function prefixOverlaps(a: string, b: string): boolean {
   if (a === b) {
     return true;
@@ -150,13 +170,18 @@ export class FanoutRunner {
     subtasks: FanoutSubtask[],
   ): Promise<FanoutResult> {
     const result: FanoutResult = { merged: [], failed: [] };
-    const completed: Array<{ subId: string; sub: FanoutSubtask; branch: string; summary: string }> =
-      [];
+    const completed: Array<
+      { subId: string; sub: FanoutSubtask; branch: string; worktreePath: string; summary: string }
+    > = [];
     let index = 0;
     let nextWorker = 0;
+    // Fan-out worktrees outlive a round, and nextWorker resets each run, so a
+    // per-run tag keeps subIds (and their branch/worktree names) unique across
+    // rounds of the same goal instead of colliding on "goal-0".
+    const runTag = crypto.randomUUID().slice(0, 4);
 
     const runOne = async (sub: FanoutSubtask, workerId: number): Promise<void> => {
-      const subId = `${goalId}-${workerId}`;
+      const subId = `${goalId}-${runTag}-${workerId}`;
       this.emit(this.store.appendLifecycleEvent({
         kind: "subagent.spawned",
         goalId,
@@ -195,7 +220,59 @@ export class FanoutRunner {
         } finally {
           await codex.stop().catch(() => {});
         }
-        await gitCommitAll(assignment.worktreePath, `${subId} ${sub.title}`);
+        // Enforce the declared write scope before committing: gitCommitAll would
+        // otherwise commit everything in the worktree, so revert anything the
+        // sub-agent touched outside its scope and keep only in-scope work.
+        const statusOut = await runCommand(assignment.worktreePath, [
+          "git",
+          "status",
+          "--porcelain",
+        ]);
+        const changedFiles = statusOut.split(/\r?\n/)
+          .filter((line) => line.trim().length > 0)
+          .map((line) => {
+            let file = line.slice(3);
+            if (file.includes(" -> ")) {
+              file = file.split(" -> ").at(-1) ?? file;
+            }
+            if (file.startsWith('"') && file.endsWith('"')) {
+              file = file.slice(1, -1);
+            }
+            return file;
+          });
+        const violations = scopeViolations(changedFiles, sub.writeScope);
+        for (const file of violations) {
+          try {
+            await runCommand(assignment.worktreePath, ["git", "checkout", "HEAD", "--", file]);
+          } catch {
+            // Untracked file - checkout cannot restore it, so remove it outright.
+            // Recursive because porcelain reports a fully-untracked directory as
+            // one "dir/" entry, not per-file.
+            try {
+              await Deno.remove(path.join(assignment.worktreePath, file), { recursive: true });
+            } catch {
+              // Already gone.
+            }
+          }
+        }
+        const allOutOfScope = changedFiles.length > 0 &&
+          violations.length === changedFiles.length;
+
+        const commit = await gitCommitAll(assignment.worktreePath, `${subId} ${sub.title}`);
+        if (commit === null) {
+          // A no-op (or wholly out-of-scope) branch must never be reported
+          // upward as merged work.
+          const error = allOutOfScope
+            ? "all changes were outside the declared write scope"
+            : "produced no file changes";
+          this.reportAgent(subId, sub.title, "blocked", `${sub.title} - ${error}`.slice(0, 200));
+          result.failed.push({ title: sub.title, error });
+          return;
+        }
+        let summary = responseText.trim().slice(0, 600) || "(no summary)";
+        if (violations.length) {
+          summary += `\nNOTE: reverted out-of-scope changes: ${violations.join(", ")}`;
+        }
         // Optionally push the sub-agent's branch to origin on completion, so
         // its work is shareable before the final merge.
         let pushed = false;
@@ -206,7 +283,8 @@ export class FanoutRunner {
           subId,
           sub,
           branch: assignment.branchName,
-          summary: responseText.trim().slice(0, 600) || "(no summary)",
+          worktreePath: assignment.worktreePath,
+          summary,
         });
         this.reportAgent(
           subId,
@@ -272,10 +350,14 @@ export class FanoutRunner {
           summary: `${done.sub.title} merged into the loop branch.`,
           data: { title: done.sub.title, branch: done.branch },
         }));
+        // Reclaim the merged sub-worktree so rounds do not accumulate them.
+        await removeTaskWorktree(this.root, done.worktreePath, done.branch);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.reportAgent(done.subId, done.sub.title, "blocked", `${done.sub.title} - merge failed`);
         result.failed.push({ title: done.sub.title, error: `merge failed: ${message}` });
+        // On merge failure, deliberately leave the branch and worktree in place
+        // for inspection - unique names keep the next round from colliding.
       }
     }
     return result;
