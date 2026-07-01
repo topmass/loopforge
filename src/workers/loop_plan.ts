@@ -27,11 +27,7 @@ export function parseLoopPlan(markdown: string): LoopPlanItem[] {
     if (!match) {
       continue;
     }
-    const status: LoopPlanStatus = match[1] === "~"
-      ? "doing"
-      : match[1] === " "
-      ? "todo"
-      : "done";
+    const status: LoopPlanStatus = match[1] === "~" ? "doing" : match[1] === " " ? "todo" : "done";
     const body = match[2].trim();
     const separator = body.indexOf(" -- ");
     const title = (separator >= 0 ? body.slice(0, separator) : body).trim();
@@ -70,6 +66,13 @@ export function loopPlanContract(maxParallel = 5): string {
   each completable in one focused working session.
 - Work ONE item per turn (finish a small one and start the next if time allows). Run real
   commands to verify your work before checking an item off; put the proof in the evidence note.
+- BEFORE you start building in a turn: make sure every remaining piece of work already exists as an
+  unchecked "- [ ]" item, mark the ONE item you are about to do as "- [~]", and SAVE ${LOOP_PLAN_FILE}
+  before you touch any other file. The user watches this file live as a Kanban board - it must always
+  show what is queued ("- [ ]"), what you are doing right now ("- [~]"), and what is done ("- [x]").
+- Never append a new item already checked. A new item enters as "- [ ]" (or "- [~]" if you begin it
+  immediately) and is checked only once its evidence note exists. ${LOOP_PLAN_FILE} is a live plan,
+  not a changelog of work you already finished.
 - Record decisions, discoveries, and anything the next iteration must know directly in
   ${LOOP_PLAN_FILE} under the relevant item. This file and the repo are your memory.
 - Do not create commits; LoopForge commits the worktree after every turn.

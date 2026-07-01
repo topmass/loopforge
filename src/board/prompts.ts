@@ -24,6 +24,10 @@ ask for input is the system's last resort.
 - The only absolute blockers are: missing credentials or secrets, third-party accounts or
   payment, approval for a destructive or irreversible action, or a product decision that
   changes the task's scope. Nothing else justifies waiting on a human.
+- Security posture changes are blockers too, never judgment calls: opening a private platform
+  or its deploys to public writes, disabling auth or token gates, exposing secrets, or widening
+  who can modify a deployed system. Attended: stop with one prepared question. Unattended: keep
+  the safer posture, finish the rest, and record the decision needed in the handoff.
 - For every other uncertainty, make the most reasonable decision, record it in the handoff,
   and keep working.
 - When an acceptance criterion cannot be verified inside the repository (running the game or

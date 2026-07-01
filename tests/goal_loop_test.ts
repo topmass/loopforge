@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { BoardStore } from "../src/board/store.ts";
 import { GoalLoopRunner } from "../src/workers/goal_loop.ts";
+import { parseLifecycleEvent } from "../src/board/lifecycle.ts";
 import { LoopForgeWorker } from "../src/workers/loopforge_worker.ts";
 import type {
   CodexClient,
@@ -680,6 +681,60 @@ Deno.test("goal loop still merges a real red-to-green gate and reports the diffs
     assertEquals(report.outcome, "merged");
     const summary = store.getGoal(goal.id).closureSummary;
     assert(/files? changed/.test(summary), `expected a diffstat in the closure, got: ${summary}`);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop mirrors the plan live mid-turn, not only at turn end", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let turnResolved = false;
+  // Each plan.updated is tagged with whether the turn had resolved when it
+  // arrived, so we can prove a "doing" update landed BEFORE the turn completed.
+  const planUpdates: Array<{ turnResolved: boolean; steps: Array<{ status: string }> }> = [];
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Ship live mirroring");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 1,
+      onEvent: (event) => {
+        if (event.role === "lifecycle" && event.kind === "plan.updated") {
+          const parsed = parseLifecycleEvent(event);
+          planUpdates.push({
+            turnResolved,
+            steps: (parsed?.data.steps as Array<{ status: string }>) ?? [],
+          });
+        }
+      },
+      createCodexClient: (onEvent) =>
+        new ScriptedLoopClient(onEvent, async (cwd) => {
+          // Queue one in-progress and one todo item, then work long enough for a
+          // mirror tick (3s period) to fire before the turn resolves.
+          await Deno.writeTextFile(
+            `${cwd}/LOOP_PLAN.md`,
+            "# Plan\n- [~] Build the widget\n- [ ] Document it\n",
+          );
+          await new Promise((resolve) => setTimeout(resolve, 4_000));
+          await Deno.writeTextFile(
+            `${cwd}/LOOP_PLAN.md`,
+            "# Plan\n- [x] Build the widget -- done\n- [ ] Document it\n",
+          );
+          turnResolved = true;
+          return "Made progress.";
+        }),
+    });
+    await runner.run(goal.id);
+    // More than one plan.updated for a single turn proves live mirroring.
+    assert(planUpdates.length > 1, `expected 2+ plan.updated, got ${planUpdates.length}`);
+    // A "doing" update arrived while the turn was still running.
+    const doingMidTurn = planUpdates.find((update) =>
+      !update.turnResolved && update.steps.some((step) => step.status === "doing")
+    );
+    assert(doingMidTurn, "expected a doing plan.updated before the turn resolved");
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });

@@ -24,7 +24,11 @@ Some prose the agent wrote.
     note: "needs ConfigEntry wiring",
   });
   assertEquals(items[1].status, "doing");
-  assertEquals(items[2], { title: "Fix soil planting", status: "done", note: "proven by dotnet build" });
+  assertEquals(items[2], {
+    title: "Fix soil planting",
+    status: "done",
+    note: "proven by dotnet build",
+  });
   assertEquals(items[3].status, "done");
   assertEquals(loopPlanComplete(items), false);
   assertEquals(loopPlanComplete(items.slice(2)), true);
@@ -45,4 +49,8 @@ Deno.test("loop signals: complete token, blocked ask, stall fingerprint", () => 
   assert(same !== loopPlanFingerprint(items, "def456"));
   assertStringIncludes(loopPlanContract(), "LOOP_PLAN.md");
   assertStringIncludes(loopPlanContract(), "LOOP_BLOCKED");
+  // The plan is a live Kanban, not a post-hoc changelog: it must teach the
+  // in-progress marker and the changelog ban.
+  assertStringIncludes(loopPlanContract(), "- [~]");
+  assertStringIncludes(loopPlanContract(), "not a changelog");
 });

@@ -39,6 +39,7 @@ import {
   loopPlanComplete,
   loopPlanContract,
   loopPlanFingerprint,
+  LoopPlanItem,
   parseLoopPlan,
   signalsComplete,
 } from "./loop_plan.ts";
@@ -72,6 +73,10 @@ export class GoalLoopRunner {
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
   private readonly runMode: RunMode;
+  // The last plan snapshot the board reflects. Both the live mirror and the
+  // turn-end sync update it so an unchanged plan never re-emits. One-shot per
+  // run() (a fresh runner per goal loop), so no reset is needed.
+  private lastPlanKey = "";
 
   constructor(
     private readonly root: string,
@@ -185,6 +190,11 @@ export class GoalLoopRunner {
             objective: currentObjective,
           });
         probeFeedback = "";
+        // Mirror the plan file live while the (minutes-long) turn runs so the
+        // board shows queued/in-progress work, not just a teleport to Done at
+        // turn end. The finally stops it on every path: success, the session-lost
+        // continue, and a rethrow.
+        const stopMirror = this.startPlanMirror(goalId, assignment.worktreePath);
         try {
           await codex.runTurn(session, {
             title: `${goalId}: loop ${iteration}`,
@@ -201,6 +211,8 @@ export class GoalLoopRunner {
             continue;
           }
           throw error;
+        } finally {
+          stopMirror();
         }
         // Clarify turn: surface the agent's questions and stop. Answering in
         // chat re-runs the loop with the answers queued, so it plans next time.
@@ -225,12 +237,7 @@ export class GoalLoopRunner {
           `${goalId} loop iteration ${iteration}`,
         );
         const items = parseLoopPlan(await this.readPlanFile(assignment.worktreePath));
-        for (const event of this.store.syncLoopPlanTasks(goalId, items)) {
-          this.emit(event);
-        }
-        if (items.length) {
-          this.emit(this.store.appendLifecycleEvent(planUpdated(goalId, items)));
-        }
+        this.mirrorPlan(goalId, items);
 
         if (wrapUp) {
           const reason = wrapUp === "tokens"
@@ -613,6 +620,48 @@ End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> o
     } catch {
       return "";
     }
+  }
+
+  // Sync the parsed plan onto the board and emit plan.updated, but only when the
+  // plan changed since the last emit. Shared by the turn-end path and the live
+  // mirror so the same content never emits twice (the mirror's final tick and
+  // the turn-end call collapse to one). syncLoopPlanTasks and appendLifecycleEvent
+  // are synchronous SQLite calls on this single-threaded event loop, so the
+  // mirror and turn-end never interleave mid-write - no locking concern.
+  private mirrorPlan(goalId: string, items: LoopPlanItem[]): void {
+    const key = items.map((item) => `${item.status}|${item.title}`).join(";");
+    if (!items.length || key === this.lastPlanKey) {
+      return;
+    }
+    this.lastPlanKey = key;
+    for (const event of this.store.syncLoopPlanTasks(goalId, items)) {
+      this.emit(event);
+    }
+    this.emit(this.store.appendLifecycleEvent(planUpdated(goalId, items)));
+  }
+
+  // Poll LOOP_PLAN.md every 3s while a turn runs so the board mirrors the plan
+  // live. Polling (not Deno.watchFs) survives editor renames and writes from any
+  // tool. Errors in a tick are swallowed - mirroring must never break the loop.
+  // Returns an idempotent stopper the turn's finally always calls.
+  private startPlanMirror(goalId: string, worktreePath: string): () => void {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        this.mirrorPlan(goalId, parseLoopPlan(await this.readPlanFile(worktreePath)));
+      } catch {
+        // A mirror tick must never break the loop; swallow and keep polling.
+      }
+      if (!stopped) {
+        timer = setTimeout(tick, 3_000);
+      }
+    };
+    timer = setTimeout(tick, 3_000);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }
 
   private finish(

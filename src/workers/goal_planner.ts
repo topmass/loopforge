@@ -186,6 +186,10 @@ Rules:
   served or deployed page for the new behavior or content, run the produced program, or hit the
   API. A probe must observe what the user asked for, not the presence of related strings in
   source code.
+- Check BEHAVIOR, not markup: prefer HTTP status codes, API responses, and functional round
+  trips (publish something, then fetch it back) over grepping served HTML for exact attribute
+  strings. A probe that dictates specific markup makes the worker chase string matches instead
+  of building the feature.
 - RED-FIRST: every probe must be a check that FAILS before the work is done and passes only once
   it is done. If a candidate probe would already pass on the repo as it stands, it is not a win
   condition - replace it with one that proves the NEW work. LoopForge runs a baseline at goal
