@@ -112,6 +112,21 @@ export class BoardStore {
     return { goal: result.goal, task: result.tasks[0] };
   }
 
+  // A goal with no tasks yet. The goal-loop kickoff creates the goal instantly
+  // (so the board shows it) and streams the compiled plan onto it later via
+  // attachPlanToGoal once the minutes-long planning turn finishes.
+  createBareGoal(text: string): Goal {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error("Goal text is required.");
+    }
+    const goalId = this.nextHumanId("GOAL", "goals");
+    this.db.prepare(
+      "INSERT INTO goals (id, text, completion_contract, status, closure_summary, created_at) VALUES (?, ?, ?, 'open', '', ?)",
+    ).run(goalId, trimmed, "", timestamp());
+    return this.getGoal(goalId);
+  }
+
   createGoalWithTasks(
     text: string,
     drafts: TaskDraft[],
@@ -123,15 +138,74 @@ export class BoardStore {
     }
     const taskDrafts = drafts.length ? drafts : [defaultTaskDraft(trimmed)];
 
-    const now = timestamp();
     const goalId = this.nextHumanId("GOAL", "goals");
-
     this.db.prepare(
       "INSERT INTO goals (id, text, completion_contract, status, closure_summary, created_at) VALUES (?, ?, ?, 'open', '', ?)",
-    ).run(goalId, trimmed, normalizeCompletionContract(trimmed, taskDrafts, options), now);
+    ).run(goalId, trimmed, normalizeCompletionContract(trimmed, taskDrafts, options), timestamp());
 
+    const tasks = this.insertTaskDrafts(
+      goalId,
+      taskDrafts,
+      trimmed,
+      "Created from LoopForge intake. Awaiting worker handoff.",
+    );
+
+    if (options.probes?.length) {
+      this.addProbes(goalId, options.probes);
+    }
+    const goal = this.getGoal(goalId);
+    this.appendEvent(
+      tasks[0]?.id ?? null,
+      null,
+      "compiler",
+      "goal",
+      `Created ${tasks.length} task${tasks.length === 1 ? "" : "s"} from ${goalId}.`,
+    );
+    return { goal, tasks };
+  }
+
+  // Land a compiled plan onto an existing (bare) goal: its tasks, probes, and
+  // completion contract. Shares the task-insert path with createGoalWithTasks.
+  attachPlanToGoal(
+    goalId: string,
+    drafts: TaskDraft[],
+    options: { completionContract?: string; probes?: GoalProbeDraft[] } = {},
+  ): { goal: Goal; tasks: Task[] } {
+    const goal = this.getGoal(goalId);
+    const taskDrafts = drafts.length ? drafts : [defaultTaskDraft(goal.text)];
+    this.db.prepare("UPDATE goals SET completion_contract = ? WHERE id = ?").run(
+      normalizeCompletionContract(goal.text, taskDrafts, options),
+      goalId,
+    );
+    const tasks = this.insertTaskDrafts(
+      goalId,
+      taskDrafts,
+      goal.text,
+      "Created from LoopForge intake. Awaiting worker handoff.",
+    );
+    if (options.probes?.length) {
+      this.addProbes(goalId, options.probes);
+    }
+    this.appendEvent(
+      tasks[0]?.id ?? null,
+      null,
+      "compiler",
+      "goal",
+      `Created ${tasks.length} task${tasks.length === 1 ? "" : "s"} from ${goalId}.`,
+    );
+    return { goal: this.getGoal(goalId), tasks };
+  }
+
+  // Insert task drafts for a goal, wiring dependsOn titles to the new task ids.
+  private insertTaskDrafts(
+    goalId: string,
+    drafts: TaskDraft[],
+    fallbackText: string,
+    workpadFallback: string,
+  ): Task[] {
+    const now = timestamp();
     const existingTaskCount = this.maxIdNumber("tasks");
-    const planned = taskDrafts.map((draft, index) => ({
+    const planned = drafts.map((draft, index) => ({
       draft,
       taskId: `TASK-${existingTaskCount + index + 1}`,
     }));
@@ -153,7 +227,7 @@ export class BoardStore {
         taskId,
         goalId,
         normalizeTitle(draft.title),
-        draft.description.trim() || trimmed,
+        draft.description.trim() || fallbackText,
         "ready",
         draft.kind === "ops" ? "ops" : "code",
         draft.kind === "ops" ? normalizeOpsAction(draft.opsAction) : null,
@@ -163,7 +237,7 @@ export class BoardStore {
         null,
         JSON.stringify(dependencyIds),
         normalizeRiskLevel(draft.riskLevel),
-        draft.verificationPlan?.trim() || defaultVerificationPlan(trimmed),
+        draft.verificationPlan?.trim() || defaultVerificationPlan(fallbackText),
         "queued",
         0,
         "waiting",
@@ -171,8 +245,8 @@ export class BoardStore {
         "Start this task when its dependencies are done.",
         null,
         "",
-        draft.workpad?.trim() || "Created from LoopForge intake. Awaiting worker handoff.",
-        draft.acceptanceCriteria.trim() || defaultAcceptance(trimmed),
+        draft.workpad?.trim() || workpadFallback,
+        draft.acceptanceCriteria.trim() || defaultAcceptance(fallbackText),
         "",
         null,
         now,
@@ -180,19 +254,7 @@ export class BoardStore {
       );
       tasks.push(this.getTask(taskId));
     }
-
-    if (options.probes?.length) {
-      this.addProbes(goalId, options.probes);
-    }
-    const goal = this.getGoal(goalId);
-    this.appendEvent(
-      tasks[0]?.id ?? null,
-      null,
-      "compiler",
-      "goal",
-      `Created ${tasks.length} task${tasks.length === 1 ? "" : "s"} from ${goalId}.`,
-    );
-    return { goal, tasks };
+    return tasks;
   }
 
   addTasksToGoal(goalId: string, drafts: TaskDraft[]): { goal: Goal; tasks: Task[] } {

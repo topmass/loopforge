@@ -123,11 +123,16 @@ export function startServer(
       maxIterations?: number;
       questionMode?: boolean;
     } = {},
+    // The kickoff flow holds goalLoopRunning across planning already, so it asks
+    // to skip the guard rather than re-acquire it.
+    alreadyRunning = false,
   ): boolean => {
-    if (goalLoopRunning) {
-      return false;
+    if (!alreadyRunning) {
+      if (goalLoopRunning) {
+        return false;
+      }
+      goalLoopRunning = true;
     }
-    goalLoopRunning = true;
     queueMicrotask(() => {
       const runner = new GoalLoopRunner(normalizedRoot, store, {
         ...opts,
@@ -704,21 +709,16 @@ export function startServer(
           if (!text) {
             return json({ error: "Goal text is required." }, 400);
           }
-          const planner = new GoalPlanner(normalizedRoot, {
-            projectMemory: buildProjectMemory(store),
-            createCodexClient: options.createCodexClient,
-            onEvent: (event) => {
-              const activity = store.appendAgentEvent(event);
-              broadcastActivity(activity);
-            },
-          });
-          const plan = await planner.planGoal(text);
-          const created = store.createGoalWithTasks(text, plan.tasks, {
-            completionContract: plan.completionContract,
-            probes: plan.probes,
-          });
-          broadcastBoard();
-          launchGoalLoop(created.goal.id, {
+          // Hold the single-flow lock across planning AND the loop so a second
+          // POST during the minutes-long planning turn is rejected. Released on
+          // every failure path below and when the loop finishes. Rechecked here
+          // because reading the body awaited - two POSTs can interleave past the
+          // entry check.
+          if (goalLoopRunning) {
+            return json({ error: "A goal loop is already running." }, 409);
+          }
+          goalLoopRunning = true;
+          const opts = {
             hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
             tokenBudget: typeof body.tokens === "number" && body.tokens > 0
               ? body.tokens
@@ -727,8 +727,48 @@ export function startServer(
               ? Math.floor(body.iterations)
               : undefined,
             questionMode: body.questionMode === true,
+          };
+          // Create the goal first so the board shows it instantly, then plan and
+          // start the loop after responding - the planning turn no longer blocks
+          // the request.
+          const goal = store.createBareGoal(text);
+          broadcastActivity(store.appendLifecycleEvent({
+            kind: "goal.planning",
+            goalId: goal.id,
+            taskId: null,
+            summary: "Planning the goal into tasks and win conditions...",
+            data: {},
+          }));
+          queueMicrotask(async () => {
+            const planner = new GoalPlanner(normalizedRoot, {
+              projectMemory: buildProjectMemory(store),
+              createCodexClient: options.createCodexClient,
+              onEvent: (event) => {
+                const activity = store.appendAgentEvent(event);
+                broadcastActivity(activity);
+              },
+            });
+            try {
+              const plan = await planner.planGoal(text);
+              store.attachPlanToGoal(goal.id, plan.tasks, {
+                completionContract: plan.completionContract,
+                probes: plan.probes,
+              });
+              broadcastBoard();
+              launchGoalLoop(goal.id, opts, true);
+            } catch (error) {
+              goalLoopRunning = false;
+              const message = error instanceof Error ? error.message : String(error);
+              broadcastActivity(store.appendLifecycleEvent({
+                kind: "goal.blocked",
+                goalId: goal.id,
+                taskId: null,
+                summary: `Planning failed: ${message}`,
+                data: { error: message },
+              }));
+            }
           });
-          return json({ ok: true, goalId: created.goal.id, running: true }, 201);
+          return json({ ok: true, goalId: goal.id, planning: true }, 201);
         }
 
         // Add a task to a goal = steer it. The loop owner folds the task into

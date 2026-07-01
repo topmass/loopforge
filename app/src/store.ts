@@ -23,6 +23,9 @@ interface AppState {
   activity: ActivityEvent[];
   // The most recent plan.updated step list per goal - the Kanban/planet source.
   planByGoal: Record<string, PlanStep[]>;
+  // Goals whose kickoff planning turn is in flight (goal exists, no plan yet).
+  // Set on goal.planning; cleared once the plan lands or the goal moves on.
+  planningByGoal: Record<string, boolean>;
   // Sub-agents spawned by the loop owner, per goal - distinct nodes in the
   // planet view (the main agent is the core; these are its satellites).
   subagentsByGoal: Record<string, { title: string; state: "running" | "merged" }[]>;
@@ -47,6 +50,7 @@ export const useStore = create<AppState>((set) => ({
   lifecycle: [],
   activity: [],
   planByGoal: {},
+  planningByGoal: {},
   subagentsByGoal: {},
   activeGoalId: null,
   selectedTaskId: null,
@@ -77,6 +81,20 @@ export const useStore = create<AppState>((set) => ({
       }
       if (lifecycle) {
         next.lifecycle = [...state.lifecycle.slice(-400), lifecycle];
+        // Kickoff planning window: show a planning indicator until the plan
+        // lands (plan.updated) or the goal moves on (task/blocked/closed).
+        if (lifecycle.goalId) {
+          if (lifecycle.kind === "goal.planning") {
+            next.planningByGoal = { ...state.planningByGoal, [lifecycle.goalId]: true };
+          } else if (
+            lifecycle.kind === "plan.updated" ||
+            lifecycle.kind === "task.added" ||
+            lifecycle.kind === "goal.blocked" ||
+            lifecycle.kind === "goal.closed"
+          ) {
+            next.planningByGoal = { ...state.planningByGoal, [lifecycle.goalId]: false };
+          }
+        }
         // plan.updated carries the authoritative step list for its goal.
         if (lifecycle.kind === "plan.updated" && lifecycle.goalId) {
           const steps = (lifecycle.data.steps as PlanStep[]) ?? [];

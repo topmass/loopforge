@@ -36,9 +36,10 @@ export const api = {
     jsonFetch<{ events: LifecycleEvent[] }>(
       `/api/lifecycle${goalId ? `?goalId=${encodeURIComponent(goalId)}` : ""}`,
     ),
-  // Start a fresh goal-loop from plain text (no active goal yet).
+  // Start a fresh goal-loop from plain text (no active goal yet). The goal is
+  // created immediately (planning: true) and the plan streams in afterwards.
   startGoalLoop: (text: string, opts?: { hours?: number; questionMode?: boolean }) =>
-    jsonFetch<{ goalId: string }>("/api/goals/loop", {
+    jsonFetch<{ goalId: string; planning: boolean }>("/api/goals/loop", {
       method: "POST",
       body: JSON.stringify({ text, ...opts }),
     }),

@@ -974,6 +974,138 @@ Deno.test("one-step goal loop plans from text and loops it to a merged close", a
   }
 });
 
+// Holds the planner turn open on a deferred promise so the test can observe the
+// goal (and its goal.planning lifecycle event) BEFORE planning resolves, then
+// lands a plan with tasks + probes that the loop drives to a merged close.
+class DeferredPlanLoopClient extends TestCodexClient {
+  constructor(
+    onEvent: (event: {
+      taskId: string | null;
+      runId: string | null;
+      role: string;
+      kind: string;
+      message: string;
+    }) => void,
+    private readonly planGate: Promise<void>,
+  ) {
+    super(onEvent);
+  }
+
+  override async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    if (input.title === "LoopForge goal compiler") {
+      await this.planGate;
+      this.onEvent({
+        taskId: null,
+        runId: null,
+        role: "codex",
+        kind: "agent",
+        message: JSON.stringify({
+          completionContract: "- Ship the widget.",
+          probes: [{ label: "widget file exists", command: "test -f widget.txt" }],
+          tasks: [{
+            title: "Ship the widget",
+            prompt: "Implement and verify the widget.",
+            acceptanceCriteria: "- widget.txt exists.",
+            priority: 200,
+            workpad: "Compiled task.",
+          }],
+        }),
+      });
+      return {
+        threadId: session.threadId,
+        turnId: "turn-deferred-plan",
+        status: "completed",
+        completed: true,
+      };
+    }
+    if (/: loop \d+$/.test(input.title)) {
+      await Deno.writeTextFile(
+        `${session.cwd}/LOOP_PLAN.md`,
+        "# Plan\n- [x] Ship the widget -- wrote widget.txt\n",
+      );
+      await Deno.writeTextFile(`${session.cwd}/widget.txt`, "widget\n");
+      this.onEvent({
+        taskId: null,
+        runId: null,
+        role: "codex",
+        kind: "agent",
+        message: "LOOP_COMPLETE",
+      });
+      return {
+        threadId: session.threadId,
+        turnId: "loop-turn",
+        status: "completed",
+        completed: true,
+      };
+    }
+    return await super.runTurn(session, input);
+  }
+}
+
+Deno.test("goal loop kickoff creates the goal before planning and rejects a second start", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const port = 50933 + Math.floor(Math.random() * 300);
+  let releasePlan: () => void = () => {};
+  const planGate = new Promise<void>((resolve) => {
+    releasePlan = resolve;
+  });
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new DeferredPlanLoopClient(onEvent, planGate),
+  });
+  try {
+    const start = await fetch(`${server.url}/api/goals/loop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Ship the widget", hours: 1 }),
+    });
+    assertEquals(start.status, 201);
+    const body = await start.json();
+    assertEquals(body.planning, true);
+    assert(String(body.goalId).startsWith("GOAL-"));
+
+    // The goal already exists on the board before the planner resolves.
+    const board = await fetch(`${server.url}/api/board`).then((r) => r.json());
+    assert(board.goals.some((g: { id: string }) => g.id === body.goalId));
+
+    // A goal.planning lifecycle event was emitted at kickoff.
+    const feed = await fetch(`${server.url}/api/lifecycle?goalId=${body.goalId}`).then((r) =>
+      r.json()
+    );
+    assert(feed.events.some((e: { kind: string }) => e.kind === "goal.planning"));
+
+    // A second POST while the first flow is still planning is rejected.
+    const second = await fetch(`${server.url}/api/goals/loop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Another goal" }),
+    });
+    assertEquals(second.status, 409);
+    await second.json();
+
+    // Release planning: the plan attaches tasks + probes and the loop closes it.
+    releasePlan();
+    for (let index = 0; index < 120; index++) {
+      const b = await fetch(`${server.url}/api/board`).then((r) => r.json());
+      const goal = b.goals.find((g: { id: string }) => g.id === body.goalId);
+      const tasks = b.tasks.filter((t: { goalId: string; kind?: string }) =>
+        t.goalId === body.goalId && t.kind !== "loop"
+      );
+      const probes = b.probes.filter((p: { goalId: string }) => p.goalId === body.goalId);
+      if (goal?.status === "closed" && tasks.length >= 1 && probes.length >= 1) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Goal loop kickoff did not attach the plan and close the goal.");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
 Deno.test("adding a task to a goal steers it and emits task.added", async () => {
   const root = Deno.makeTempDirSync();
   await git(root, ["init", "-b", "main"]);

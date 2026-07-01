@@ -725,9 +725,26 @@ function EmptyState() {
 // the owning agent plans and works live - like kicking off a Codex goal.
 function IdlePlan({ goalId }: { goalId: string }) {
   const loopActiveAt = useStore((s) => s.loopActiveAt[goalId]);
+  const planning = useStore((s) => s.planningByGoal[goalId]);
   const working = loopActiveAt !== undefined && Date.now() - loopActiveAt < 120_000;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+
+  // Kickoff: the goal exists but planning is still compiling it into tasks and
+  // win conditions. Calm indicator instead of the idle "start the loop" prompt.
+  if (planning) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-500">
+        <div className="flex items-center gap-2 text-lg">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-orange-500" />
+          Planning the goal
+        </div>
+        <div className="max-w-md text-sm text-slate-500">
+          Breaking it into tasks and win conditions...
+        </div>
+      </div>
+    );
+  }
 
   if (working) {
     return (
@@ -872,6 +889,7 @@ function DetailPanel() {
 }
 
 function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; hasOpenGoal: boolean }) {
+  const setActiveGoal = useStore((s) => s.setActiveGoal);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -886,7 +904,10 @@ function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; h
       if (activeGoalId && hasOpenGoal) {
         await api.addTask(activeGoalId, value);
       } else {
-        await api.startGoalLoop(value, { questionMode: ask });
+        // Focus the freshly created goal so its planning indicator shows even if
+        // a closed goal was the previously active one.
+        const { goalId } = await api.startGoalLoop(value, { questionMode: ask });
+        setActiveGoal(goalId);
       }
       setText("");
     } catch (e) {

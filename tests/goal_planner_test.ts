@@ -1,5 +1,15 @@
-import { assertEquals } from "@std/assert";
-import { parsePlannerPlanResponse, parsePlannerResponse } from "../src/workers/goal_planner.ts";
+import { assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  buildPlannerPrompt,
+  parsePlannerPlanResponse,
+  parsePlannerResponse,
+} from "../src/workers/goal_planner.ts";
+
+Deno.test("planner prompt states the red-first win-condition rule", () => {
+  const prompt = buildPlannerPrompt("Add a widget to the settings page");
+  assertStringIncludes(prompt, "FAILS before the work");
+  assertStringIncludes(prompt, "OUTCOME");
+});
 
 Deno.test("planner parser accepts fenced JSON task lists", () => {
   const tasks = parsePlannerResponse(`Here is the plan:

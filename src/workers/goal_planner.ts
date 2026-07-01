@@ -167,7 +167,7 @@ function parseProbeDrafts(value: unknown): GoalProbeDraft[] {
   });
 }
 
-function buildPlannerPrompt(
+export function buildPlannerPrompt(
   goalText: string,
   projectMemory = "No project memory was supplied.",
   workflowInstructions = "No WORKFLOW.md instructions were supplied.",
@@ -181,10 +181,18 @@ Rules:
 - Output only valid JSON. Do not wrap it in markdown.
 - Return one JSON object with completionContract, probes, and tasks.
 - probes is a JSON array of 1 to 6 executable win conditions: objects with label,
-  command, and optional expectContains. Each command is a shell one-liner run from the
-  repository root that exits 0 when the win condition holds (it may start and stop a
-  process it needs). Prefer cheap, deterministic checks: test commands, curl checks with
-  expected output, file/grep checks. The goal can only close when every probe passes.
+  command, and optional expectContains. The goal can only close when every probe passes.
+- Each probe verifies the OUTCOME of the requested work in its real runtime form: curl the
+  served or deployed page for the new behavior or content, run the produced program, or hit the
+  API. A probe must observe what the user asked for, not the presence of related strings in
+  source code.
+- RED-FIRST: every probe must be a check that FAILS before the work is done and passes only once
+  it is done. If a candidate probe would already pass on the repo as it stands, it is not a win
+  condition - replace it with one that proves the NEW work. LoopForge runs a baseline at goal
+  start; already-green probes are demoted to regression guards and cannot close the goal.
+- Each command is a shell one-liner run from the repository root that exits 0 on success (it may
+  start and stop a process it needs). Keep probes cheap and deterministic. Grep or file checks are
+  acceptable only as secondary probes next to at least one outcome probe.
 - completionContract is a compact markdown checklist that defines what must be true before the overall goal can be closed.
 - tasks is a JSON array of 1 to 12 task objects.
 - Each task object must include title, prompt, acceptanceCriteria, priority, workpad, dependsOn, riskLevel, and verificationPlan.
