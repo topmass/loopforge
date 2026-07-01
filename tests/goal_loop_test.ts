@@ -174,6 +174,9 @@ Deno.test("goal loop holds the merge in attended mode and restart lands it", asy
   try {
     store.initProject();
     const { goal } = store.createGoal("Ship the dialog");
+    // A real red-at-start probe (dialog.txt is absent at baseline) keeps this a
+    // strong gate, so completion routes through the manual-verification hold.
+    store.addProbes(goal.id, [{ label: "dialog exists", command: "test -f dialog.txt" }]);
     const runner = new GoalLoopRunner(root, store, {
       runMode: "attended",
       onEvent: () => {},
@@ -587,6 +590,125 @@ Deno.test("question mode asks first, then plans after the answer is queued", asy
     });
     const second = await runner2.run(goal.id);
     assertEquals(second.outcome, "merged");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop holds an attended merge when every probe was green at baseline", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Do the thing");
+    // `true` passes at baseline, so the probe cannot prove any new work.
+    store.addProbes(goal.id, [{ label: "always green", command: "true" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "attended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) =>
+        new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [x] Do the thing -- done\n");
+          return "LOOP_COMPLETE";
+        }),
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "held");
+    assertEquals(store.getGoal(goal.id).status, "open");
+    const hold = store.getBoard().tasks.find((task) =>
+      task.currentGate === "manual-verification" && task.kind === "code"
+    );
+    assert(hold, "expected a parked merge-hold task");
+    assertStringIncludes(hold!.needsInputPrompt ?? "", "already green");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop merges an unattended weak gate but flags the closure with a caution", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Do the thing");
+    store.addProbes(goal.id, [{ label: "always green", command: "true" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) =>
+        new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [x] Do the thing -- done\n");
+          return "LOOP_COMPLETE";
+        }),
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "merged");
+    assertStringIncludes(store.getGoal(goal.id).closureSummary, "CAUTION");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop still merges a real red-to-green gate and reports the diffstat", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Build the file");
+    // Fails at baseline (built.txt is absent), passes once the loop writes it.
+    store.addProbes(goal.id, [{ label: "built exists", command: "test -f built.txt" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) =>
+        new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(
+            `${cwd}/LOOP_PLAN.md`,
+            "# Plan\n- [x] Build it -- wrote built.txt\n",
+          );
+          await Deno.writeTextFile(`${cwd}/built.txt`, "built\n");
+          return "LOOP_COMPLETE";
+        }),
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "merged");
+    const summary = store.getGoal(goal.id).closureSummary;
+    assert(/files? changed/.test(summary), `expected a diffstat in the closure, got: ${summary}`);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop marks a pre-green probe in the first prompt", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Something");
+    store.addProbes(goal.id, [{ label: "always green", command: "true" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 1,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(`${cwd}/LOOP_PLAN.md`, "# Plan\n- [ ] Work\n");
+          return "working";
+        });
+        return client;
+      },
+    });
+    await runner.run(goal.id);
+    assertStringIncludes(client!.prompts[0], "ALREADY PASSING");
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });

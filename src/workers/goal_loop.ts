@@ -102,6 +102,26 @@ export class GoalLoopRunner {
     });
     const projectInstructions = await collectAgentsInstructions(this.root);
 
+    // A win condition already green before any work cannot prove new work. Run
+    // the probes once at baseline so pre-green ones become regression guards in
+    // the prompt and weaken the completion gate. preGreen is computed per run()
+    // invocation: a resumed loop re-baselines against work already done, which
+    // can only make the gate more conservative (more probes look pre-green).
+    const preGreen = new Set<number>();
+    if (this.store.listProbes(goalId).length) {
+      const baseline = await runGoalProbes(this.root, this.store, goalId, assignment.worktreePath);
+      for (const result of baseline.results) {
+        if (result.passed) {
+          preGreen.add(result.probe.id);
+        }
+      }
+      this.emitEvent(
+        goalId,
+        "probes",
+        `Baseline: ${baseline.passed}/${baseline.total} win conditions already pass before any work begins.`,
+      );
+    }
+
     let responseText = "";
     let tokensUsed = 0;
     const codex = this.createCodexClient((event) => {
@@ -158,7 +178,7 @@ export class GoalLoopRunner {
         const prompt = doClarify
           ? this.buildClarifyPrompt(goal, projectInstructions)
           : iteration === 1 && !planExists
-          ? this.buildFirstPrompt(goal, projectInstructions, queued.map((m) => m.message))
+          ? this.buildFirstPrompt(goal, projectInstructions, queued.map((m) => m.message), preGreen)
           : this.buildContinuationPrompt(queued.map((m) => m.message), probeFeedback, {
             wrapUp,
             objectiveChanged,
@@ -271,7 +291,19 @@ export class GoalLoopRunner {
             assignment.worktreePath,
           );
           if (!summary.total || summary.passed === summary.total) {
-            return await this.completeGoal(goalId, iteration, assignment.branchName, summary);
+            const weakGate = summary.total === 0 ||
+              summary.results.every((result) => preGreen.has(result.probe.id));
+            const reason = summary.total === 0
+              ? "no win conditions were recorded"
+              : "every win condition was already green before work began";
+            return await this.completeGoal(
+              goalId,
+              iteration,
+              assignment.branchName,
+              summary,
+              weakGate,
+              reason,
+            );
           }
           const failing = summary.results.filter((result) => !result.passed);
           probeFeedback = [
@@ -341,10 +373,30 @@ export class GoalLoopRunner {
     iterations: number,
     branchName: string,
     summary: { total: number; passed: number },
+    weakGate: boolean,
+    reason: string,
   ): Promise<GoalLoopReport> {
-    const evidence = summary.total
+    let evidence = summary.total
       ? `Win conditions ${summary.passed}/${summary.total} passed in the loop worktree.`
       : "No probes recorded; loop plan fully checked with evidence notes.";
+    // A weak gate means the passing probes cannot prove the NEW work (none were
+    // recorded, or every one was already green at baseline). Attended holds for
+    // human review; unattended merges but flags the closure so the outcome does
+    // not read as proven success.
+    if (weakGate && this.runMode === "attended") {
+      const prompt =
+        `Loop complete, but ${reason}, so passing probes cannot prove the new work. Review the branch ${branchName} yourself, then restart this task and LoopForge merges immediately.`;
+      const holdTask = this.store.createLoopMergeHoldTask(goalId, branchName, prompt, evidence);
+      this.emitEvent(
+        goalId,
+        "hold",
+        `Loop work held in Review as ${holdTask.id} until manual verification.`,
+      );
+      return this.finish(goalId, iterations, "held", prompt);
+    }
+    if (weakGate) {
+      evidence += ` CAUTION: ${reason}; probe passes do not prove the new work.`;
+    }
     this.emit(this.store.appendLifecycleEvent({
       kind: "verified",
       goalId,
@@ -403,7 +455,13 @@ export class GoalLoopRunner {
     ) {
       this.emit(event);
     }
-    const result = this.store.closeGoal(goalId, `${evidence} Merged ${branchName}.`, {
+    // A goal that "succeeds" with a tiny diff must say so where the user reads
+    // the outcome; surface git's stat summary line in the closure text.
+    const statLine = output.match(/\d+ files? changed[^\n]*/);
+    const closure = `${evidence} Merged ${branchName}.${
+      statLine ? ` (${statLine[0].trim()})` : ""
+    }`;
+    const result = this.store.closeGoal(goalId, closure, {
       force: true,
     });
     this.emit(result.event);
@@ -411,7 +469,7 @@ export class GoalLoopRunner {
       kind: "goal.closed",
       goalId,
       taskId: null,
-      summary: `${evidence} Merged ${branchName}.`,
+      summary: closure,
       data: { branch: branchName, iterations },
     }));
     // Merge landed and the goal is closed, so its own loop worktree + branch are
@@ -423,7 +481,7 @@ export class GoalLoopRunner {
       await removeTaskWorktree(this.root, worktree, branchName);
       this.store.setGoalLoopState(goalId, { threadId: null, branch: null, worktree: null });
     }
-    return this.finish(goalId, iterations, "merged", `${evidence} Merged ${branchName}.`);
+    return this.finish(goalId, iterations, "merged", closure);
   }
 
   private async openLoopSession(
@@ -465,6 +523,7 @@ plan yet. End your reply with a line containing only: LOOP_QUESTIONS`;
     goal: Goal,
     projectInstructions: string,
     addedTasks: string[] = [],
+    preGreen: Set<number> = new Set(),
   ): string {
     const probes = this.store.listProbes(goal.id);
     const addedBlock = addedTasks.length
@@ -472,6 +531,19 @@ plan yet. End your reply with a line containing only: LOOP_QUESTIONS`;
         addedTasks.map((t) => `- ${t}`).join("\n")
       }\n`
       : "";
+    const preGreenCount = probes.filter((probe) => preGreen.has(probe.id)).length;
+    const probesBlock = probes.length
+      ? probes.map((probe) =>
+        `- ${probe.label}: ${probe.command}${
+          preGreen.has(probe.id)
+            ? " [ALREADY PASSING at goal start - regression guard only, cannot prove new work]"
+            : ""
+        }`
+      ).join("\n") +
+        (preGreenCount
+          ? `\n${preGreenCount} of ${probes.length} win conditions above already pass before any work. They are regression guards only: your evidence notes and plan items must prove the NEW work with checks that were failing before you did it.`
+          : "")
+      : "- none recorded; your evidence notes carry the proof.";
     return `You are the LoopForge goal loop owner for ${goal.id}, working in this dedicated worktree until the goal is genuinely done.
 
 ${autonomyContract(this.runMode)}
@@ -480,11 +552,7 @@ ${goal.text}
 ${addedBlock}
 
 Win conditions (LoopForge runs these for real; the goal only closes when they pass):
-${
-      probes.length
-        ? probes.map((probe) => `- ${probe.label}: ${probe.command}`).join("\n")
-        : "- none recorded; your evidence notes carry the proof."
-    }
+${probesBlock}
 
 Project context from the original folder:
 ${projectInstructions}
