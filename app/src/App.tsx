@@ -668,7 +668,11 @@ function Board() {
     [];
   const activeWorkers = useStore((s) => s.runtime?.activeAgentStatuses) ?? [];
   const externalAgents = useStore((s) => s.runtime?.externalAgents) ?? [];
-  const probes = useStore((s) => s.board?.probes ?? []);
+  // Fallback OUTSIDE the selector: an inline `?? []` returns a fresh array per
+  // call while board is null, and useSyncExternalStore treats the unstable
+  // snapshot as an infinite update loop (React #185) now that Board mounts
+  // before the first board snapshot arrives.
+  const probes = useStore((s) => s.board?.probes) ?? [];
   const selectTask = useStore((s) => s.selectTask);
 
   const goals = board?.goals ?? [];
