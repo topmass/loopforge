@@ -1,12 +1,13 @@
 import { DetailPanel } from "./DetailPanel";
 import { ActivityDrawer } from "./ActivityDrawer";
+import { DiffPanel } from "./DiffPanel";
 
 export type RightTab = "detail" | "activity" | "diff";
 
 // The persistent right column: a fixed-width side panel with three tabs. Detail
-// (default) shows the selected task; Activity shows the lifecycle stream; Diff is
-// a disabled placeholder for Wave D. The old logOpen toggle that swapped whole
-// panels is gone - the panel stays mounted and the tabs switch its content.
+// (default) shows the selected task; Activity shows the lifecycle stream; Diff
+// shows the active goal's per-loop diff. The old logOpen toggle that swapped
+// whole panels is gone - the panel stays mounted and the tabs switch its content.
 export function RightPanel({ tab, onTab }: { tab: RightTab; onTab: (t: RightTab) => void }) {
   const tabClass = (active: boolean) =>
     `rounded-md px-3 py-1 text-xs font-medium transition ${
@@ -21,16 +22,11 @@ export function RightPanel({ tab, onTab }: { tab: RightTab; onTab: (t: RightTab)
         <button type="button" onClick={() => onTab("activity")} className={tabClass(tab === "activity")}>
           Activity
         </button>
-        <button
-          type="button"
-          disabled
-          title="Diff viewer lands in Wave D"
-          className="cursor-not-allowed rounded-md px-3 py-1 text-xs font-medium text-slate-300"
-        >
+        <button type="button" onClick={() => onTab("diff")} className={tabClass(tab === "diff")}>
           Diff
         </button>
       </div>
-      {tab === "activity" ? <ActivityDrawer /> : <DetailPanel />}
+      {tab === "activity" ? <ActivityDrawer /> : tab === "diff" ? <DiffPanel /> : <DetailPanel />}
     </aside>
   );
 }

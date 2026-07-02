@@ -109,6 +109,26 @@ export interface GoalThread {
   truncated: boolean;
 }
 
+// The Diff view payload: GET /api/goals/:id/diff. Per-file unified patches for
+// the goal's loop branch (base..branch while open, the merge commit once closed).
+// Each patch is a standard "diff --git" chunk; counts come from git numstat.
+export interface GoalDiffFile {
+  path: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+  binary?: boolean;
+  truncated?: boolean;
+}
+
+export interface GoalDiff {
+  goalId: string;
+  files: GoalDiffFile[];
+  truncated: boolean;
+  // Present only when a closed goal has no merged changes to show.
+  note?: string;
+}
+
 export interface BoardSnapshot {
   goals: Goal[];
   tasks: Task[];

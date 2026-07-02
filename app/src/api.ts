@@ -6,6 +6,7 @@ import type {
   ActivityEvent,
   BoardSnapshot,
   DirEntry,
+  GoalDiff,
   GoalThread,
   LifecycleEvent,
   ProjectEntry,
@@ -82,6 +83,9 @@ export const api = {
   // A goal's loop conversation grouped into turns, for the Thread view.
   getGoalThread: (goalId: string) =>
     jsonFetch<GoalThread>(`/api/goals/${encodeURIComponent(goalId)}/thread`),
+  // A goal's per-loop diff (base..branch while open, the merge commit once closed).
+  getGoalDiff: (goalId: string) =>
+    jsonFetch<GoalDiff>(`/api/goals/${encodeURIComponent(goalId)}/diff`),
   // Start a fresh goal-loop from plain text (no active goal yet). The goal is
   // created immediately (planning: true) and the plan streams in afterwards.
   startGoalLoop: (text: string, opts?: { hours?: number; questionMode?: boolean }) =>
