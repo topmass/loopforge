@@ -82,6 +82,21 @@ const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 
 type SqlRow = Record<string, unknown>;
 
+// The Thread view shape: a goal's loop conversation grouped into turns.
+export interface ThreadEntry {
+  id: number;
+  at: string;
+  kind: string;
+  role: string;
+  text: string;
+}
+
+export interface ThreadTurn {
+  index: number;
+  startedAt: string | null;
+  entries: ThreadEntry[];
+}
+
 export class BoardStore {
   readonly root: string;
   readonly db: DatabaseSync;
@@ -1628,12 +1643,13 @@ export class BoardStore {
     kind: string,
     message: string,
     raw?: unknown,
+    goalId: string | null = null,
   ): ActivityEvent {
     const now = timestamp();
     const rawJson = raw === undefined ? null : JSON.stringify(raw);
     const result = this.db.prepare(
-      "INSERT INTO events (task_id, run_id, role, kind, message, created_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(taskId, runId, role, kind, message, now, rawJson);
+      "INSERT INTO events (task_id, run_id, role, kind, message, created_at, raw_json, goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(taskId, runId, role, kind, message, now, rawJson, goalId);
     return {
       id: Number(result.lastInsertRowid),
       taskId,
@@ -1643,10 +1659,11 @@ export class BoardStore {
       message,
       createdAt: now,
       rawJson,
+      goalId,
     };
   }
 
-  appendAgentEvent(event: ActivityEventInput): ActivityEvent {
+  appendAgentEvent(event: ActivityEventInput, goalId: string | null = null): ActivityEvent {
     return this.appendEvent(
       event.taskId,
       event.runId,
@@ -1654,6 +1671,7 @@ export class BoardStore {
       event.kind,
       event.message,
       event.raw,
+      goalId,
     );
   }
 
@@ -1661,6 +1679,8 @@ export class BoardStore {
   // read. Returns the stored ActivityEvent so callers can broadcast it.
   appendLifecycleEvent(event: LifecycleEvent): ActivityEvent {
     const activity = lifecycleToActivity(event);
+    // Copy the goalId out of the payload into the column so SQL can filter a
+    // goal's lifecycle rows (Thread/Diff views) without parsing raw_json.
     return this.appendEvent(
       activity.taskId,
       activity.runId,
@@ -1668,6 +1688,7 @@ export class BoardStore {
       activity.kind,
       activity.message,
       activity.raw,
+      event.goalId,
     );
   }
 
@@ -1686,6 +1707,94 @@ export class BoardStore {
       .map(parseLifecycleEvent)
       .filter((event): event is LifecycleEvent => event !== null);
     return goalId ? events.filter((event) => event.goalId === goalId) : events;
+  }
+
+  // A goal's loop conversation for the Thread view, grouped into turns. Primary
+  // path reads goal_id-tagged rows; boards written before goal tagging fall back
+  // to the "${goalId}: " loop-message marker plus lifecycle rows whose payload
+  // goalId matches, so old goals still render. Steers (goal_messages) merge in
+  // by created_at. Capped so the payload stays bounded on long-running goals.
+  getGoalThread(goalId: string): { turns: ThreadTurn[]; truncated: boolean } {
+    const tagged = this.db.prepare(
+      "SELECT COUNT(*) AS c FROM events WHERE goal_id = ?",
+    ).get(goalId) as { c: number };
+    const events = Number(tagged.c) > 0
+      ? (this.db.prepare("SELECT * FROM events WHERE goal_id = ? ORDER BY id ASC").all(
+        goalId,
+      ) as SqlRow[]).map(eventFromRow)
+      : this.legacyGoalEvents(goalId);
+
+    // Turn 0 is setup: everything before the first iteration marker. Each
+    // iteration marker opens a new turn; entries stay in id order within a turn.
+    const turns: ThreadTurn[] = [{ index: 0, startedAt: null, entries: [] }];
+    let turnIndex = 0;
+    for (const event of events) {
+      if (isIterationMarker(event)) {
+        turns.push({ index: ++turnIndex, startedAt: event.createdAt, entries: [] });
+      }
+      turns[turns.length - 1].entries.push({
+        id: event.id,
+        at: event.createdAt,
+        kind: event.kind,
+        role: event.role,
+        text: event.message,
+      });
+    }
+
+    // Merge steers (processed and pending) into the turn whose time window holds
+    // their created_at: the last turn started at or before the steer, else setup.
+    const steers = this.db.prepare(
+      "SELECT * FROM goal_messages WHERE goal_id = ? ORDER BY id ASC",
+    ).all(goalId) as SqlRow[];
+    for (const row of steers) {
+      const at = String(row.created_at);
+      let target = turns[0];
+      for (const turn of turns) {
+        if (turn.startedAt !== null && at >= turn.startedAt) {
+          target = turn;
+        }
+      }
+      target.entries.push({
+        id: Number(row.id),
+        at,
+        kind: "steer",
+        role: "user",
+        text: String(row.message),
+      });
+    }
+
+    // ISO timestamps sort chronologically; events keep id order on ties since
+    // they were pushed before steers.
+    for (const turn of turns) {
+      turn.entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    }
+
+    let result = turns.filter((turn) => turn.entries.length > 0);
+    let truncated = false;
+    // Keep the newest 40 turns, then drop oldest turns until under 2000 entries,
+    // so the Thread view never ships an unbounded payload.
+    if (result.length > 40) {
+      result = result.slice(-40);
+      truncated = true;
+    }
+    while (result.length > 1 && countThreadEntries(result) > 2000) {
+      result.shift();
+      truncated = true;
+    }
+    return { turns: result, truncated };
+  }
+
+  // Legacy fallback for boards written before goal tagging: recover a goal's
+  // loop stream from the "${goalId}: " message marker plus lifecycle rows whose
+  // payload goalId matches. The untagged raw agent chatter cannot be attributed
+  // to a goal without the column, so it is not recoverable here.
+  private legacyGoalEvents(goalId: string): ActivityEvent[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM events WHERE (role = 'loop' AND message LIKE ?) OR role = ? ORDER BY id ASC",
+    ).all(`${goalId}: %`, LIFECYCLE_ROLE) as SqlRow[];
+    return rows.map(eventFromRow).filter((event) =>
+      event.role !== LIFECYCLE_ROLE || parseLifecycleEvent(event)?.goalId === goalId
+    );
   }
 
   enqueueMessage(taskId: string, role: string, message: string): ActivityEvent {
@@ -1939,6 +2048,7 @@ export class BoardStore {
     this.ensureColumn("tasks", "touched_paths_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("tasks", "conflict_signals_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("events", "raw_json", "TEXT");
+    this.ensureColumn("events", "goal_id", "TEXT");
     this.ensureColumn("agent_status", "thread_id", "TEXT");
     this.ensureColumn("agent_status", "turn_id", "TEXT");
     this.ensureColumn("agent_status", "headline", "TEXT NOT NULL DEFAULT ''");
@@ -2492,7 +2602,18 @@ function eventFromRow(row: SqlRow): ActivityEvent {
     message: String(row.message),
     createdAt: String(row.created_at),
     rawJson: nullableString(row.raw_json),
+    goalId: nullableString(row.goal_id),
   };
+}
+
+// A turn boundary: the loop's per-iteration marker event.
+function isIterationMarker(event: ActivityEvent): boolean {
+  return event.role === "loop" && event.kind === "iteration" &&
+    event.message.includes("Loop iteration");
+}
+
+function countThreadEntries(turns: ThreadTurn[]): number {
+  return turns.reduce((total, turn) => total + turn.entries.length, 0);
 }
 
 function messageFromRow(row: SqlRow): QueuedMessage {

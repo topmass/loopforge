@@ -148,6 +148,12 @@ Deno.test("FanoutRunner runs disjoint subtasks in parallel worktrees and merges 
     assert(external.every((agent) => agent.state === "done"), JSON.stringify(external));
     assert(external.some((agent) => agent.agent === "api"));
     assert(external.some((agent) => agent.agent === "ui"));
+
+    // Fan-out events (subagent lifecycle + sub-agent chatter) carry the goal id.
+    const tagged = store.db.prepare("SELECT COUNT(*) AS c FROM events WHERE goal_id = ?").get(
+      goal.id,
+    ) as { c: number };
+    assert(Number(tagged.c) > 0, "expected goal-tagged fan-out events");
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });

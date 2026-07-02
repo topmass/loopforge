@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { BoardStore, readConfig, updateConfig } from "../src/board/store.ts";
 import { summarizeGoalProgress } from "../src/board/goal_progress.ts";
 
@@ -707,6 +707,120 @@ Deno.test("task and goal ids never collide after deletions", () => {
     }]);
     assertEquals(followUp.tasks[0].id, "TASK-4");
     assertEquals(third.goal.id, "GOAL-3");
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("appendEvent and appendLifecycleEvent write the goal_id column", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Tag events");
+    const tagged = store.appendEvent(
+      null,
+      null,
+      "loop",
+      "iteration",
+      `${goal.id}: Loop iteration 1/2 started.`,
+      undefined,
+      goal.id,
+    );
+    assertEquals(tagged.goalId, goal.id);
+    const agent = store.appendAgentEvent(
+      { taskId: null, runId: null, role: "loop", kind: "agent", message: "working" },
+      goal.id,
+    );
+    assertEquals(agent.goalId, goal.id);
+    store.appendLifecycleEvent({
+      kind: "verified",
+      goalId: goal.id,
+      taskId: null,
+      summary: "ok",
+      data: {},
+    });
+    const rows = store.db.prepare("SELECT goal_id FROM events WHERE goal_id = ?").all(goal.id);
+    assertEquals(rows.length, 3);
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("getGoalThread groups loop events into turns and merges steers", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Thread me");
+    store.appendEvent(
+      null,
+      null,
+      "loop",
+      "iteration",
+      `${goal.id}: Loop iteration 1/3 started.`,
+      undefined,
+      goal.id,
+    );
+    store.appendAgentEvent(
+      { taskId: null, runId: null, role: "loop", kind: "agent", message: "working on it" },
+      goal.id,
+    );
+    store.appendEvent(
+      null,
+      null,
+      "loop",
+      "iteration",
+      `${goal.id}: Loop iteration 2/3 started.`,
+      undefined,
+      goal.id,
+    );
+    store.appendAgentEvent(
+      { taskId: null, runId: null, role: "loop", kind: "agent", message: "done" },
+      goal.id,
+    );
+    store.enqueueGoalMessage(goal.id, "user", "please also add tests");
+
+    const thread = store.getGoalThread(goal.id);
+    assertEquals(thread.truncated, false);
+    // The empty setup turn is dropped; two iteration turns remain.
+    assertEquals(thread.turns.length, 2);
+    assertEquals(thread.turns[0].index, 1);
+    assertEquals(thread.turns[1].index, 2);
+    const entries = thread.turns.flatMap((turn) => turn.entries);
+    const steer = entries.find((entry) => entry.kind === "steer");
+    assert(steer, "expected a steer entry");
+    assertEquals(steer!.role, "user");
+    assertStringIncludes(steer!.text, "add tests");
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("getGoalThread falls back to the message marker for untagged boards", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Legacy thread");
+    // Legacy rows: goal_id column is NULL, the goal id only rides in the prefix.
+    store.appendEvent(null, null, "loop", "iteration", `${goal.id}: Loop iteration 1/2 started.`);
+    store.appendEvent(null, null, "loop", "agent", `${goal.id}: did the work`);
+    // A legacy lifecycle row: column NULL, goalId only in the raw_json payload.
+    store.appendEvent(null, null, "lifecycle", "verified", "verified it", {
+      goalId: goal.id,
+      taskRef: null,
+      data: {},
+    });
+
+    const thread = store.getGoalThread(goal.id);
+    const entries = thread.turns.flatMap((turn) => turn.entries);
+    assert(entries.some((entry) => entry.kind === "iteration"), "marker scan should find the turn");
+    assert(entries.some((entry) => entry.text.includes("did the work")));
+    assert(entries.some((entry) => entry.kind === "verified"), "lifecycle row should be recovered");
   } finally {
     store.close();
     Deno.removeSync(root, { recursive: true });

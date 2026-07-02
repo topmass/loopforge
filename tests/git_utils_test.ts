@@ -1,9 +1,11 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import path from "node:path";
 import { BoardStore } from "../src/board/store.ts";
 import {
   gitCommitAll,
+  gitDiffRange,
   gitMergeBranchLeased,
+  gitMergeCommitFor,
   gitPublishRoot,
   LeaseStore,
   prepareTaskWorktree,
@@ -313,6 +315,81 @@ Deno.test("gitMergeBranchLeased releases the lease when the merge conflicts", as
     await assertRejects(() => gitMergeBranchLeased(store, root, "feature"), Error);
     // The failed merge still released the lease in the finally block.
     assertEquals(store.calls, ["acquire", "release"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gitDiffRange returns per-file patches with numstat counts", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await Deno.writeTextFile(`${root}/a.txt`, "one\n");
+    await git(root, ["add", "a.txt"]);
+    await git(root, ["commit", "-m", "base"]);
+    await git(root, ["checkout", "-b", "feature"]);
+    await Deno.writeTextFile(`${root}/a.txt`, "one\ntwo\n");
+    await Deno.writeTextFile(`${root}/b.txt`, "new\n");
+    await git(root, ["add", "-A"]);
+    await git(root, ["commit", "-m", "feature work"]);
+    await git(root, ["checkout", "main"]);
+
+    const result = await gitDiffRange(root, "main", "feature");
+    assertEquals(result.truncated, false);
+    const byPath = Object.fromEntries(result.files.map((file) => [file.path, file]));
+    assertStringIncludes(byPath["a.txt"].patch, "diff --git a/a.txt b/a.txt");
+    assertEquals(byPath["a.txt"].additions, 1);
+    assertEquals(byPath["a.txt"].deletions, 0);
+    assertEquals(byPath["b.txt"].additions, 1);
+    assertEquals(byPath["b.txt"].deletions, 0);
+    assertStringIncludes(byPath["b.txt"].patch, "+new");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gitDiffRange marks binary files with zero counts", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await git(root, ["commit", "--allow-empty", "-m", "base"]);
+    await git(root, ["checkout", "-b", "feature"]);
+    await Deno.writeFile(`${root}/blob.bin`, new Uint8Array([0, 1, 2, 0, 255, 0, 7]));
+    await git(root, ["add", "-A"]);
+    await git(root, ["commit", "-m", "add binary"]);
+    await git(root, ["checkout", "main"]);
+
+    const result = await gitDiffRange(root, "main", "feature");
+    const bin = result.files.find((file) => file.path === "blob.bin");
+    assert(bin, "expected the binary file in the diff");
+    assertEquals(bin!.binary, true);
+    assertEquals(bin!.additions, 0);
+    assertEquals(bin!.deletions, 0);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gitMergeCommitFor finds a merge by branch name", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    await git(root, ["init", "-b", "main"]);
+    await git(root, ["commit", "--allow-empty", "-m", "base"]);
+    await git(root, ["checkout", "-b", "loopforge/goal-4"]);
+    await Deno.writeTextFile(`${root}/x.txt`, "x\n");
+    await git(root, ["add", "-A"]);
+    await git(root, ["commit", "-m", "goal work"]);
+    await git(root, ["checkout", "main"]);
+    await git(root, ["merge", "--no-ff", "loopforge/goal-4", "-m", "Merge loopforge/goal-4"]);
+
+    const hash = await gitMergeCommitFor(root, "loopforge/goal-4");
+    assert(hash, "expected a merge commit hash");
+    // The merge commit's diff (first-parent to merge) shows the branch's file.
+    const result = await gitDiffRange(root, `${hash}^1`, hash!, { threeDot: false });
+    assert(result.files.some((file) => file.path === "x.txt"));
+
+    // An unmerged branch name has no merge commit.
+    assertEquals(await gitMergeCommitFor(root, "loopforge/goal-999"), null);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

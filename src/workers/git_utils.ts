@@ -387,6 +387,115 @@ export async function gitMergeBranch(root: string, branchName: string): Promise<
   ]);
 }
 
+// A single file's changes within a diff, for the Diff panel.
+export interface DiffFile {
+  path: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+  binary?: boolean;
+  truncated?: boolean;
+}
+
+export interface DiffResult {
+  files: DiffFile[];
+  truncated: boolean;
+}
+
+// The diff between two refs, parsed into per-file patches with numstat counts.
+// threeDot (default) uses `base...head` = the merge-base-to-head diff, which is
+// what a live loop branch off main wants; threeDot:false does a plain two-dot
+// `base head`, which is how a merge commit's changes (`<hash>^1 <hash>`) read.
+export async function gitDiffRange(
+  root: string,
+  base: string,
+  head: string,
+  opts: { threeDot?: boolean } = {},
+): Promise<DiffResult> {
+  const refs = opts.threeDot === false ? [base, head] : [`${base}...${head}`];
+  const [numstat, patch] = await Promise.all([
+    runCommand(root, ["git", "diff", "--numstat", ...refs]),
+    runCommand(root, ["git", "diff", ...refs]),
+  ]);
+  return parseDiff(numstat, patch);
+}
+
+// Find the merge commit that landed a reclaimed loop branch. LoopForge merges
+// with the message "Merge <branchName>"; --fixed-strings keeps branch chars
+// (/, -) literal. Returns null when no merge is found.
+// ponytail: substring --grep, so goal-4 also matches goal-40 - anchor the grep
+// if goal ids ever collide as prefixes.
+export async function gitMergeCommitFor(
+  root: string,
+  branchName: string,
+): Promise<string | null> {
+  const out = await runCommand(root, [
+    "git",
+    "log",
+    "--merges",
+    "--fixed-strings",
+    `--grep=${branchName}`,
+    "-n",
+    "1",
+    "--format=%H",
+  ]).catch(() => "");
+  const hash = out.trim().split(/\r?\n/)[0]?.trim() ?? "";
+  return hash || null;
+}
+
+// Split a unified diff into per-file patches (by "diff --git" boundaries) and
+// join each with its numstat counts. Binary files show "-" in numstat and map
+// to 0/0 with binary:true. Caps: 80,000 chars/patch, 200 files total.
+export function parseDiff(numstat: string, patch: string): DiffResult {
+  const counts = new Map<string, { additions: number; deletions: number; binary: boolean }>();
+  for (const line of numstat.split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+    const [added, deleted, ...rest] = line.split("\t");
+    const path = rest.join("\t").trim();
+    if (!path) {
+      continue;
+    }
+    const binary = added === "-" || deleted === "-";
+    counts.set(path, {
+      additions: binary ? 0 : Number(added) || 0,
+      deletions: binary ? 0 : Number(deleted) || 0,
+      binary,
+    });
+  }
+
+  const files: DiffFile[] = [];
+  let truncated = false;
+  // The leading "diff --git " is stripped by the split; re-add it per chunk.
+  const chunks = patch.split(/^diff --git /m).filter((chunk) => chunk.trim().length);
+  for (const chunk of chunks) {
+    if (files.length >= 200) {
+      truncated = true;
+      break;
+    }
+    const header = chunk.split("\n", 1)[0];
+    const match = header.match(/^a\/(.*) b\/(.*)$/);
+    const path = (match ? match[2] : header).trim();
+    const stat = counts.get(path);
+    let filePatch = `diff --git ${chunk}`;
+    let fileTruncated = false;
+    if (filePatch.length > 80_000) {
+      filePatch = filePatch.slice(0, 80_000);
+      fileTruncated = true;
+    }
+    files.push({
+      path,
+      additions: stat?.additions ?? 0,
+      deletions: stat?.deletions ?? 0,
+      patch: filePatch,
+      ...(stat?.binary ? { binary: true } : {}),
+      ...(fileTruncated ? { truncated: true } : {}),
+    });
+  }
+  return { files, truncated };
+}
+
 // Structural subset of BoardStore that a merge lease needs - lets both the
 // dispatcher worker and the goal loop serialize merges into a shared root
 // across separate LoopForge processes without importing the whole store.

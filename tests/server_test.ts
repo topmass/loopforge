@@ -1513,3 +1513,96 @@ Deno.test("server removes a registered project and refuses to remove its own roo
     await Deno.remove(other, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test("server returns a goal's turn-grouped thread and 404s unknown goals", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const seed = new BoardStore(root);
+  seed.initProject();
+  const { goal } = seed.createGoal("Thread through the GUI");
+  seed.appendEvent(
+    null,
+    null,
+    "loop",
+    "iteration",
+    `${goal.id}: Loop iteration 1/2 started.`,
+    undefined,
+    goal.id,
+  );
+  seed.appendAgentEvent(
+    { taskId: null, runId: null, role: "loop", kind: "agent", message: "did work" },
+    goal.id,
+  );
+  seed.enqueueGoalMessage(goal.id, "user", "add a footer");
+  seed.close();
+
+  const port = 52733 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const thread = await fetch(`${server.url}/api/goals/${goal.id}/thread`).then((r) => r.json());
+    assertEquals(thread.goalId, goal.id);
+    assertEquals(thread.turns.length, 1);
+    assertEquals(thread.turns[0].index, 1);
+    const entries = thread.turns.flatMap(
+      (turn: { entries: Array<{ kind: string; role: string; text: string }> }) => turn.entries,
+    );
+    assert(entries.some((entry: { kind: string }) => entry.kind === "iteration"));
+    assert(
+      entries.some((entry: { role: string; kind: string }) =>
+        entry.role === "user" && entry.kind === "steer"
+      ),
+      "expected the steer merged into the thread",
+    );
+
+    const missing = await fetch(`${server.url}/api/goals/GOAL-999/thread`);
+    assertEquals(missing.status, 404);
+    await missing.json();
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("server returns a goal's per-loop diff for a live branch", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const seed = new BoardStore(root);
+  seed.initProject();
+  const { goal } = seed.createGoal("Diff through the GUI");
+  const branch = `loopforge/${goal.id.toLowerCase()}`;
+  seed.setGoalLoopState(goal.id, { branch });
+  seed.close();
+  // A live loop branch carrying one commit off main.
+  await git(root, ["checkout", "-b", branch]);
+  await Deno.writeTextFile(`${root}/feature.txt`, "hello\nworld\n");
+  await git(root, ["add", "-A"]);
+  await git(root, ["commit", "-m", "loop work"]);
+  await git(root, ["checkout", "main"]);
+
+  const port = 53033 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const diff = await fetch(`${server.url}/api/goals/${goal.id}/diff`).then((r) => r.json());
+    assertEquals(diff.goalId, goal.id);
+    assertEquals(diff.truncated, false);
+    const file = diff.files.find((f: { path: string }) => f.path === "feature.txt");
+    assert(file, "expected feature.txt in the diff");
+    assertEquals(file.additions, 2);
+    assertStringIncludes(file.patch, "diff --git a/feature.txt b/feature.txt");
+
+    const missing = await fetch(`${server.url}/api/goals/GOAL-999/diff`);
+    assertEquals(missing.status, 404);
+    await missing.json();
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});

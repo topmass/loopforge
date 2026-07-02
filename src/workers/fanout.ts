@@ -206,7 +206,7 @@ export class FanoutRunner {
           }
           const activity = { ...event, role: `fanout:${sub.title}` };
           if (shouldRecordActivity(activity)) {
-            this.emit(this.store.appendAgentEvent(activity));
+            this.emit(this.store.appendAgentEvent(activity, goalId));
           }
         });
         try {

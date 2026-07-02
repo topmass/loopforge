@@ -235,6 +235,8 @@ export interface ActivityEvent {
   message: string;
   createdAt: string;
   rawJson: string | null;
+  // Optional goal tag so SQL can filter a goal's loop conversation (Wave A).
+  goalId?: string | null;
 }
 
 export type ActivityEventInput = Omit<ActivityEvent, "id" | "createdAt" | "rawJson"> & {

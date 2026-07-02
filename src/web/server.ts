@@ -17,7 +17,12 @@ import {
 } from "../board/global_config.ts";
 import { listProjects, registerProject, removeProject } from "../board/projects.ts";
 import { CodexClient } from "../workers/codex_app_server.ts";
-import { gitMergeBranch } from "../workers/git_utils.ts";
+import {
+  gitDiffRange,
+  gitMergeBranch,
+  gitMergeCommitFor,
+  runCommand,
+} from "../workers/git_utils.ts";
 import { GoalPlanner } from "../workers/goal_planner.ts";
 import { GoalPursuer } from "../workers/goal_pursuer.ts";
 import { runScout } from "../workers/goal_scout.ts";
@@ -168,6 +173,7 @@ export function startServer(
           message: String(row.message),
           createdAt: String(row.created_at),
           rawJson: row.raw_json === null ? null : String(row.raw_json),
+          goalId: row.goal_id === null || row.goal_id === undefined ? null : String(row.goal_id),
         };
         tailCursor = event.id;
         if (!sentEventIds.has(event.id)) {
@@ -872,6 +878,54 @@ export function startServer(
           broadcastActivity(result.event);
           broadcastBoard();
           return json({ ok: true, ...result });
+        }
+
+        // The loop's conversation for a goal, turn-grouped, for the Thread view.
+        const threadGoalMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/thread$/);
+        if (threadGoalMatch && request.method === "GET") {
+          const goalId = decodeURIComponent(threadGoalMatch[1]).toUpperCase();
+          try {
+            store.getGoal(goalId);
+          } catch {
+            return json({ error: `${goalId} was not found.` }, 404);
+          }
+          return json({ goalId, ...store.getGoalThread(goalId) });
+        }
+
+        // The per-loop diff for the Diff panel. An open goal with a live branch
+        // diffs the branch against the root's current branch (three-dot); a
+        // closed goal diffs the merge commit that landed its (reclaimed) branch.
+        const diffGoalMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/diff$/);
+        if (diffGoalMatch && request.method === "GET") {
+          const goalId = decodeURIComponent(diffGoalMatch[1]).toUpperCase();
+          let goal;
+          try {
+            goal = store.getGoal(goalId);
+          } catch {
+            return json({ error: `${goalId} was not found.` }, 404);
+          }
+          // LoopForge merges into whatever the root has checked out, so resolve
+          // the base as that branch rather than assuming "main".
+          const base =
+            (await runCommand(normalizedRoot, ["git", "rev-parse", "--abbrev-ref", "HEAD"]))
+              .trim();
+          const branchLive = goal.loopBranch
+            ? await runCommand(normalizedRoot, ["git", "rev-parse", "--verify", goal.loopBranch])
+              .then(() => true).catch(() => false)
+            : false;
+          if (goal.status === "open" && goal.loopBranch && branchLive) {
+            const result = await gitDiffRange(normalizedRoot, base, goal.loopBranch);
+            return json({ goalId, files: result.files, truncated: result.truncated });
+          }
+          // Closed (or branch reclaimed): find the merge commit. loopBranch may be
+          // null after reclaim, so reconstruct the branch name from the goal id.
+          const branchName = goal.loopBranch ?? `loopforge/${goalId.toLowerCase()}`;
+          const hash = await gitMergeCommitFor(normalizedRoot, branchName);
+          if (!hash) {
+            return json({ goalId, files: [], truncated: false, note: "no merged changes found" });
+          }
+          const result = await gitDiffRange(normalizedRoot, `${hash}^1`, hash, { threeDot: false });
+          return json({ goalId, files: result.files, truncated: result.truncated });
         }
 
         const deleteGoalMatch = url.pathname.match(/^\/api\/goals\/([^/]+)$/);

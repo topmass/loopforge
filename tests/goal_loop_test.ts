@@ -165,6 +165,12 @@ Deno.test("goal loop plans, tracks DB plan items, passes probes, and merges unat
     const lastPlan = [...feed].reverse().find((e) => e.kind === "plan.updated");
     const steps = lastPlan!.data.steps as Array<{ status: string }>;
     assert(steps.every((s) => s.status === "done"));
+
+    // Loop events are tagged with the goal id so the Thread view can filter them.
+    const tagged = store.db.prepare("SELECT COUNT(*) AS c FROM events WHERE goal_id = ?").get(
+      goal.id,
+    ) as { c: number };
+    assert(Number(tagged.c) > 0, "expected goal-tagged loop events");
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });

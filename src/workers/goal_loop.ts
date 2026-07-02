@@ -161,7 +161,7 @@ export class GoalLoopRunner {
       }
       const activity = { ...event, taskId: event.taskId ?? null, runId: event.runId ?? null };
       if (shouldRecordActivity(activity)) {
-        this.emit(this.store.appendAgentEvent({ ...activity, role: "loop" }));
+        this.emit(this.store.appendAgentEvent({ ...activity, role: "loop" }, goalId));
       }
     });
 
@@ -657,7 +657,9 @@ End with LOOP_COMPLETE only when every item is done, or LOOP_BLOCKED: <ask> only
   }
 
   private emitEvent(goalId: string, kind: string, message: string): void {
-    this.emit(this.store.appendEvent(null, null, "loop", kind, `${goalId}: ${message}`));
+    this.emit(
+      this.store.appendEvent(null, null, "loop", kind, `${goalId}: ${message}`, undefined, goalId),
+    );
   }
 
   private emit(event: ActivityEvent): void {
