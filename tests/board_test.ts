@@ -880,6 +880,26 @@ Deno.test("deleteGoal removes a goal with tasks, runs, probes, and messages", ()
   }
 });
 
+Deno.test("isRunStopRequested treats a deleted run as stopped", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal, tasks } = store.createGoalWithTasks("Doomed goal", [
+      { title: "one", description: "d", acceptanceCriteria: "a", priority: 100 },
+    ]);
+    const run = store.createRun(tasks[0].id, "worker");
+    assertEquals(store.isRunStopRequested(run.id), false);
+    store.deleteGoal(goal.id);
+    // Worker timers poll this after their goal is deleted; it must signal
+    // stop instead of throwing and killing the server process.
+    assertEquals(store.isRunStopRequested(run.id), true);
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("deleted goal ids are not reused", () => {
   const root = Deno.makeTempDirSync();
   const store = new BoardStore(root);

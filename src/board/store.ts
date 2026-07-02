@@ -651,7 +651,12 @@ export class BoardStore {
   }
 
   isRunStopRequested(runId: string): boolean {
-    return Boolean(this.getRun(runId).stopRequestedAt);
+    const row = this.db.prepare("SELECT stop_requested_at FROM runs WHERE id = ?").get(runId) as
+      | SqlRow
+      | undefined;
+    // A deleted run (e.g. its goal was removed mid-loop) must read as "stop
+    // requested" so worker timers wind down instead of crashing the server.
+    return !row || Boolean(row.stop_requested_at);
   }
 
   getRunningRunForTask(taskId: string): Run | null {
