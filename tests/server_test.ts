@@ -1424,6 +1424,43 @@ Deno.test("server patches the machine-wide Claude model through the backends end
   }
 });
 
+Deno.test("server round-trips the local pi override and exposes the pi binary probe", async () => {
+  const root = Deno.makeTempDirSync();
+  const port = 52933 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const patched = await fetch(`${server.url}/api/backend`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ localPiProvider: "anthropic", localPiModel: "claude-x" }),
+    }).then((r) => r.json());
+    assertEquals(patched.localPiProvider, "anthropic");
+    assertEquals(patched.localPiModel, "claude-x");
+
+    const runtime = await fetch(`${server.url}/api/runtime`).then((r) => r.json());
+    assertEquals(runtime.localPiProvider, "anthropic");
+    assertEquals(runtime.localPiModel, "claude-x");
+    // The pi binary probe is computed once at startup; assert only its shape so
+    // the test passes whether or not pi is installed on the host.
+    assertEquals(typeof runtime.piBinary.found, "boolean");
+    assert(runtime.piBinary.version === null || typeof runtime.piBinary.version === "string");
+
+    // An empty string clears the override (back to the local endpoint provider).
+    const cleared = await fetch(`${server.url}/api/backend`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ localPiProvider: "" }),
+    }).then((r) => r.json());
+    assertEquals(cleared.localPiProvider, "");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
 Deno.test("server creates a new folder from the picker and rejects bad requests", async () => {
   const root = Deno.makeTempDirSync();
   const port = 52333 + Math.floor(Math.random() * 300);
@@ -1475,7 +1512,7 @@ Deno.test("server creates a new folder from the picker and rejects bad requests"
   }
 });
 
-Deno.test("server removes a registered project and refuses to remove its own root", async () => {
+Deno.test("server removes any registered project, including the one it is viewing", async () => {
   const root = Deno.makeTempDirSync();
   const other = Deno.makeTempDirSync();
   const port = 52533 + Math.floor(Math.random() * 300);
@@ -1496,16 +1533,18 @@ Deno.test("server removes a registered project and refuses to remove its own roo
     }).then((r) => r.json());
     assert(!removed.projects.some((p: { root: string }) => p.root === other));
 
-    // Removing the server's own root is a 400 and leaves it registered.
+    // Removing the server's own root now succeeds (registry-only; serve
+    // re-registers its own root on next boot) and drops it from the list.
     const self = await fetch(`${server.url}/api/projects`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ root }),
     });
-    assertEquals(self.status, 400);
-    await self.json();
+    assertEquals(self.ok, true);
+    const selfBody = await self.json();
+    assert(!selfBody.projects.some((p: { root: string }) => p.root === root));
     const listed = await fetch(`${server.url}/api/projects`).then((r) => r.json());
-    assert(listed.projects.some((p: { root: string }) => p.root === root));
+    assert(!listed.projects.some((p: { root: string }) => p.root === root));
   } finally {
     server.shutdown();
     await server.finished.catch(() => {});

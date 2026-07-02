@@ -1,8 +1,9 @@
 // Resolves which agent backend runs LoopForge workers and builds clients for
-// it. Codex stays the native default; claude drives the native Claude Code CLI
-// directly; pi (pi.dev) provides local models: local = pi with a
-// LoopForge-managed custom provider pointed at any OpenAI-compatible endpoint
-// (llama.cpp, vLLM, LM Studio, Ollama).
+// it. Three coding agents: codex (native Codex app-server), claude (native
+// Claude Code CLI), and local (the pi coding agent, pi.dev). local drives pi
+// with a LoopForge-managed custom provider pointed at any OpenAI-compatible
+// endpoint (llama.cpp, vLLM, LM Studio, Ollama); an advanced piProvider
+// override instead routes through pi's own provider registry.
 
 import path from "node:path";
 import { GlobalConfig, readGlobalConfig } from "../board/global_config.ts";
@@ -19,12 +20,6 @@ export function createAgentClient(
   onEvent: (event: ActivityEventInput) => void,
   config: GlobalConfig = readGlobalConfig(),
 ): CodexClient {
-  if (config.backend === "pi") {
-    return new PiRpcClient(onEvent, {
-      provider: config.pi.provider || undefined,
-      model: config.pi.model || undefined,
-    });
-  }
   if (config.backend === "claude") {
     return new ClaudeCodeClient(onEvent, {
       model: config.claude.model,
@@ -32,6 +27,14 @@ export function createAgentClient(
     });
   }
   if (config.backend === "local") {
+    // Advanced override: route through pi's own provider registry rather than
+    // the LoopForge-managed local endpoint.
+    if (config.local.piProvider) {
+      return new PiRpcClient(onEvent, {
+        provider: config.local.piProvider,
+        model: config.local.piModel || undefined,
+      });
+    }
     ensureLocalPiProvider(config);
     return new PiRpcClient(onEvent, {
       provider: LOCAL_PI_PROVIDER_ID,

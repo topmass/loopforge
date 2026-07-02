@@ -4,7 +4,11 @@ import { useStore } from "../store";
 import { api } from "../api";
 import { spring } from "./ui";
 
-const BACKENDS = ["codex", "claude", "local", "pi"] as const;
+const BACKENDS = ["codex", "claude", "local"] as const;
+// Install command shown in the local backend's doctor line when pi is missing.
+// The real package that ships the `pi` binary (verified against the installed
+// pnpm shim), not the pi.dev marketing name.
+const PI_INSTALL = "pnpm add -g @earendil-works/pi-coding-agent";
 // The real ReasoningEffort union from src/board/store.ts - keep in sync.
 const REASONING = ["low", "medium", "high", "xhigh"] as const;
 // The native Claude Code CLI's --effort ladder (see CLAUDE_EFFORT_LEVELS in
@@ -270,6 +274,64 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               runs your local Claude Code (claude CLI) with its native effort levels
             </div>
           </div>
+
+          {/* local: the pi coding agent. A doctor line for the binary, plus an
+              advanced override to route through pi's own providers. */}
+          <div className="mt-3 space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+              local
+              {runtime?.backendRaw === "local" && (
+                <span className="ml-2 rounded-full bg-accent-soft px-1.5 py-0.5 font-medium normal-case tracking-normal text-accent-ink">
+                  main agent
+                </span>
+              )}
+            </div>
+            {runtime?.piBinary?.found
+              ? (
+                <div className="text-[11px] text-ok">
+                  pi ✓ {runtime.piBinary.version ?? ""}
+                </div>
+              )
+              : (
+                <div className="text-[11px] text-warn-ink">
+                  pi not found - install:{" "}
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    title="Copy"
+                    onClick={() => void navigator.clipboard?.writeText(PI_INSTALL)}
+                    className="cursor-pointer rounded bg-surface-sunken px-1 py-0.5 font-mono text-ink-muted"
+                  >
+                    {PI_INSTALL}
+                  </span>
+                </div>
+              )}
+            <details>
+              <summary className="cursor-pointer text-[11px] text-ink-muted">advanced</summary>
+              <div className="mt-2 space-y-2">
+                <input
+                  key={`pi-provider-${runtime?.localPiProvider ?? ""}`}
+                  defaultValue={runtime?.localPiProvider ?? ""}
+                  placeholder="pi provider (blank = local endpoint)"
+                  onBlur={(e) =>
+                    void wrap("pi provider", () =>
+                      api.setLocalPi({ provider: e.target.value.trim() }))}
+                  className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+                />
+                <input
+                  key={`pi-model-${runtime?.localPiModel ?? ""}`}
+                  defaultValue={runtime?.localPiModel ?? ""}
+                  placeholder="pi model (optional)"
+                  onBlur={(e) =>
+                    void wrap("pi model", () => api.setLocalPi({ model: e.target.value.trim() }))}
+                  className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+                />
+                <div className="text-[11px] text-ink-faint">
+                  override to route through pi's own providers instead of the local endpoint
+                </div>
+              </div>
+            </details>
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-3 border-b border-line py-3">
@@ -323,7 +385,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="mt-4 text-xs text-ink-muted">
           Changes apply to new work immediately. codex uses your Codex login; claude uses Anthropic
-          usage; local/pi use your configured local model.
+          usage; local runs the pi coding agent on your configured local model.
         </div>
       </motion.div>
     </motion.div>

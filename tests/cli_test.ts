@@ -302,7 +302,7 @@ Deno.test("CLI backend flags persist to the global config and warn for claude", 
     );
     assertEquals(local.code, 0, new TextDecoder().decode(local.stderr));
     const localNotice = new TextDecoder().decode(local.stderr);
-    assertStringIncludes(localNotice, "local via pi");
+    assertStringIncludes(localNotice, "pi agent, local model qwen3-coder");
     assertStringIncludes(localNotice, "saved for next time");
     const saved = JSON.parse(await Deno.readTextFile(`${home}/config.json`));
     assertEquals(saved.backend, "local");

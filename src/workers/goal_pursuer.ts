@@ -321,8 +321,12 @@ export class GoalPursuer {
   }
 }
 
-function normalizeEscalation(value: string): "codex" | "pi" | "claude" | "local" {
-  return value === "pi" || value === "claude" || value === "local" ? value : "codex";
+function normalizeEscalation(value: string): "codex" | "claude" | "local" {
+  // "pi" merged into "local": a legacy escalation target resolves to local.
+  if (value === "pi") {
+    return "local";
+  }
+  return value === "claude" || value === "local" ? value : "codex";
 }
 
 function buildReplanPrompt(

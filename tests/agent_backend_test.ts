@@ -54,24 +54,36 @@ Deno.test("global config defaults to codex and persists backend updates", () => 
 Deno.test("agent client factory selects the configured backend", () => {
   withTempHome(() => {
     const root = Deno.makeTempDirSync();
+    const modelsPath = `${root}/models.json`;
+    Deno.env.set("LOOPFORGE_PI_MODELS_PATH", modelsPath);
     try {
       assert(createAgentClient(root, () => {}) instanceof CodexAppServerClient);
-      updateGlobalConfig({ backend: "pi" });
+
+      // local WITHOUT a pi override uses the LoopForge-managed loopforge-local
+      // provider, written into pi's models.json.
+      updateGlobalConfig({
+        backend: "local",
+        local: { endpoint: "http://127.0.0.1:8080/v1", model: "qwen3-coder" },
+      });
       assert(createAgentClient(root, () => {}) instanceof PiRpcClient);
-      const modelsPath = `${root}/models.json`;
-      Deno.env.set("LOOPFORGE_PI_MODELS_PATH", modelsPath);
-      try {
-        updateGlobalConfig({ backend: "local" });
-        assert(createAgentClient(root, () => {}) instanceof PiRpcClient);
-        const models = JSON.parse(Deno.readTextFileSync(modelsPath));
-        assertEquals(
-          models.providers[LOCAL_PI_PROVIDER_ID].baseUrl,
-          readGlobalConfig().local.endpoint,
-        );
-      } finally {
-        Deno.env.delete("LOOPFORGE_PI_MODELS_PATH");
-      }
+      const models = JSON.parse(Deno.readTextFileSync(modelsPath));
+      assertEquals(
+        models.providers[LOCAL_PI_PROVIDER_ID].baseUrl,
+        readGlobalConfig().local.endpoint,
+      );
+
+      // local WITH a pi override routes through pi's own provider registry and
+      // carries that provider/model straight to PiRpcClient.
+      updateGlobalConfig({ local: { piProvider: "anthropic", piModel: "claude-x" } });
+      const client = createAgentClient(root, () => {});
+      assert(client instanceof PiRpcClient);
+      const options = (client as unknown as {
+        options: { provider?: string; model?: string };
+      }).options;
+      assertEquals(options.provider, "anthropic");
+      assertEquals(options.model, "claude-x");
     } finally {
+      Deno.env.delete("LOOPFORGE_PI_MODELS_PATH");
       Deno.removeSync(root, { recursive: true });
     }
   });
@@ -98,7 +110,9 @@ Deno.test("planner config persists and routes the planner client independently",
     const root = Deno.makeTempDirSync();
     try {
       assertEquals(readGlobalConfig().planner, { enabled: false, backend: "codex" });
-      updateGlobalConfig({ backend: "pi" });
+      // A local backend with a pi override routes through PiRpcClient without
+      // touching pi's models.json, keeping the routing assertions hermetic.
+      updateGlobalConfig({ backend: "local", local: { piProvider: "anthropic" } });
       assert(createPlannerClient(root, () => {}) instanceof PiRpcClient);
 
       updateGlobalConfig({ planner: { enabled: true, backend: "codex" } });
@@ -115,16 +129,17 @@ Deno.test("planner config persists and routes the planner client independently",
   });
 });
 
-Deno.test("reviewer config routes review to its own backend (implement on pi, review on codex)", () => {
+Deno.test("reviewer config routes review to its own backend (implement on local, review on codex)", () => {
   withTempHome(() => {
     const root = Deno.makeTempDirSync();
     try {
       assertEquals(readGlobalConfig().reviewer, { enabled: false, backend: "codex" });
-      // Disabled reviewer follows the execution backend.
-      updateGlobalConfig({ backend: "pi" });
+      // Disabled reviewer follows the execution backend. A local+pi-override
+      // backend keeps the routing check hermetic (no models.json write).
+      updateGlobalConfig({ backend: "local", local: { piProvider: "anthropic" } });
       assert(createReviewerClient(root, () => {}) instanceof PiRpcClient);
 
-      // Enabled reviewer runs on its own backend while the loop still grinds on pi.
+      // Enabled reviewer runs on its own backend while the loop still grinds on local.
       updateGlobalConfig({ reviewer: { enabled: true, backend: "codex" } });
       assert(createReviewerClient(root, () => {}) instanceof CodexAppServerClient);
       assert(createAgentClient(root, () => {}) instanceof PiRpcClient);
@@ -152,7 +167,13 @@ Deno.test("ensureLocalPiProvider merges idempotently and preserves other provide
     );
     const config = {
       ...defaultGlobalConfig(),
-      local: { endpoint: "http://100.1.2.3:8080/v1", model: "qwen3-coder", apiKey: "none" },
+      local: {
+        endpoint: "http://100.1.2.3:8080/v1",
+        model: "qwen3-coder",
+        apiKey: "none",
+        piProvider: "",
+        piModel: "",
+      },
     };
     assertEquals(ensureLocalPiProvider(config, modelsPath, null), true);
     assertEquals(ensureLocalPiProvider(config, modelsPath, null), false);

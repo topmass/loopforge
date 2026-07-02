@@ -968,7 +968,6 @@ function applyBackendFlags(rawArgs: string[]): string[] {
     ...(backend ? { backend } : {}),
     ...(Object.keys(localPatch).length ? { local: localPatch } : {}),
     ...(model && backend === "claude" ? { claude: { model } } : {}),
-    ...(model && backend === "pi" ? { pi: { model } } : {}),
   });
   console.error(`LoopForge agent backend: ${describeBackend(config)} (saved for next time)`);
   if (config.backend === "claude") {
@@ -977,9 +976,9 @@ function applyBackendFlags(rawArgs: string[]): string[] {
         "extra usage or API credits). LoopForge worker runs will consume that budget.",
     );
   }
-  if (config.backend === "pi" || config.backend === "claude" || config.backend === "local") {
+  if (config.backend === "local") {
     console.error(
-      "Backend runs through pi (pi.dev). Install with: pnpm add -g @earendil-works/pi-coding-agent",
+      "The local backend runs through the pi coding agent. Install with: pnpm add -g @earendil-works/pi-coding-agent",
     );
   }
   return remaining;

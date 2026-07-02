@@ -33,9 +33,20 @@ export function Sidebar() {
   const remove = async (root: string) => {
     disarm();
     setError(null);
+    const wasActive = root === activeRoot;
     try {
       const { projects } = await api.removeProject(root);
       setProjects(projects);
+      // Removing the project you're viewing is allowed (the server keeps serving
+      // and re-registers its root next boot). Re-point the client at something
+      // still listed: the first remaining project, or the primary origin if none.
+      if (wasActive) {
+        if (projects.length > 0) {
+          await switchTo(projects[0].root);
+        } else {
+          setApiBase("");
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -198,24 +209,23 @@ export function Sidebar() {
                     {p.root}
                   </span>
                 </span>
-                {/* The current project cannot be removed (it would orphan the live
-                    server). x arms; a second click within 4s removes it. */}
-                {!active && (
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isArmed) void remove(p.root);
-                      else arm(p.root);
-                    }}
-                    className={isArmed
-                      ? "shrink-0 text-xs font-semibold text-danger"
-                      : "shrink-0 text-ink-faint opacity-0 transition hover:text-danger group-hover:opacity-100"}
-                  >
-                    {isArmed ? "remove?" : "×"}
-                  </span>
-                )}
+                {/* Every project row is closable (registry-only removal; serve
+                    re-registers its own root next boot). x arms; a second click
+                    within 4s removes it. */}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isArmed) void remove(p.root);
+                    else arm(p.root);
+                  }}
+                  className={isArmed
+                    ? "shrink-0 text-xs font-semibold text-danger"
+                    : "shrink-0 text-ink-faint opacity-0 transition hover:text-danger group-hover:opacity-100"}
+                >
+                  {isArmed ? "remove?" : "×"}
+                </span>
               </button>
             );
           })}

@@ -17,6 +17,7 @@ import {
 } from "../board/global_config.ts";
 import { listProjects, registerProject, removeProject } from "../board/projects.ts";
 import { CodexClient } from "../workers/codex_app_server.ts";
+import { piBinaryCommand } from "../workers/pi_rpc_client.ts";
 import {
   gitDiffRange,
   gitMergeBranch,
@@ -57,6 +58,32 @@ export interface LoopForgeServerOptions {
 }
 
 const APP_ROOT = path.normalize(decodeURIComponent(new URL("../../", import.meta.url).pathname));
+
+// Whether the pi coding agent binary (the "local" backend) is installed, probed
+// ONCE at startup and cached - /api/runtime reads this variable so it never
+// spawns a subprocess per request. Populated asynchronously; stays the
+// not-found default until the probe resolves.
+let piBinary: { found: boolean; version: string | null } = { found: false, version: null };
+(async () => {
+  try {
+    const command = piBinaryCommand();
+    const output = await new Deno.Command(command[0], {
+      args: [...command.slice(1), "--version"],
+      stdout: "piped",
+      stderr: "piped",
+      // 3s ceiling so a hung binary cannot stall the probe.
+      signal: AbortSignal.timeout(3_000),
+    }).output();
+    if (output.success) {
+      // pi prints its version to stderr, not stdout - read both.
+      const version = (new TextDecoder().decode(output.stdout).trim() ||
+        new TextDecoder().decode(output.stderr).trim()).split("\n")[0];
+      piBinary = { found: true, version: version || null };
+    }
+  } catch {
+    // Missing binary, spawn failure, or timeout all read as "not installed".
+  }
+})();
 
 // One Deno process can host several projects at once - each open project is its
 // own full startServer instance. This process-wide registry lets any instance
@@ -294,16 +321,14 @@ export function startServer(
         }
 
         // Remove a project from the sidebar registry. Registry-only: this never
-        // deletes the folder on disk. The project this server is viewing cannot
-        // be removed - it would orphan the live instance.
+        // deletes the folder on disk. Any registered root may be removed,
+        // including the one this server is viewing - serve re-registers its own
+        // root on the next boot, so registry removal is self-healing.
         if (url.pathname === "/api/projects" && request.method === "DELETE") {
           const body = await readJson<{ root?: string }>(request);
           const target = body.root?.trim() ?? "";
           if (!target) {
             return json({ error: "root is required." }, 400);
-          }
-          if (normalizeRoot(target) === normalizedRoot) {
-            return json({ error: "Cannot remove the project this server is viewing." }, 400);
           }
           removeProject(target);
           return json({ projects: projectList(normalizedRoot) });
@@ -472,6 +497,9 @@ export function startServer(
             backendRaw: readGlobalConfig().backend,
             claudeModel: readGlobalConfig().claude.model,
             claudeEffort: readGlobalConfig().claude.effort,
+            localPiProvider: readGlobalConfig().local.piProvider,
+            localPiModel: readGlobalConfig().local.piModel,
+            piBinary,
             rescue: readGlobalConfig().rescue,
             planner: readGlobalConfig().planner,
             scout: readGlobalConfig().scout,
@@ -613,20 +641,36 @@ export function startServer(
         }
 
         // Change the main agent backend (the model the loop owner + workers run
-        // on): codex / claude / local / pi. Also carries the machine-wide Claude
-        // model choice (global config claude.model), since that is the same
-        // backends surface the settings modal edits.
+        // on): codex / claude / local. Also carries the machine-wide Claude model
+        // choice (global config claude.model) and the local backend's advanced pi
+        // provider/model override, since those are the same backends surface the
+        // settings modal edits. localPi* may be empty strings to clear.
         if (url.pathname === "/api/backend" && request.method === "PATCH") {
           const body = await readJson<
-            { backend?: string; claudeModel?: string; claudeEffort?: string }
+            {
+              backend?: string;
+              claudeModel?: string;
+              claudeEffort?: string;
+              localPiProvider?: string;
+              localPiModel?: string;
+            }
           >(request);
           const hasBackend = typeof body.backend === "string" && body.backend.trim().length > 0;
           const hasClaudeModel = typeof body.claudeModel === "string" &&
             body.claudeModel.trim().length > 0;
           const hasClaudeEffort = typeof body.claudeEffort === "string" &&
             body.claudeEffort.trim().length > 0;
-          if (!hasBackend && !hasClaudeModel && !hasClaudeEffort) {
-            return json({ error: "backend, claudeModel, or claudeEffort is required." }, 400);
+          // Presence, not truthiness: an empty string is a valid "clear" value.
+          const hasLocalPiProvider = typeof body.localPiProvider === "string";
+          const hasLocalPiModel = typeof body.localPiModel === "string";
+          if (
+            !hasBackend && !hasClaudeModel && !hasClaudeEffort && !hasLocalPiProvider &&
+            !hasLocalPiModel
+          ) {
+            return json({
+              error:
+                "backend, claudeModel, claudeEffort, localPiProvider, or localPiModel is required.",
+            }, 400);
           }
           if (
             hasClaudeEffort &&
@@ -649,6 +693,14 @@ export function startServer(
                 },
               }
               : {}),
+            ...(hasLocalPiProvider || hasLocalPiModel
+              ? {
+                local: {
+                  ...(hasLocalPiProvider ? { piProvider: body.localPiProvider!.trim() } : {}),
+                  ...(hasLocalPiModel ? { piModel: body.localPiModel!.trim() } : {}),
+                },
+              }
+              : {}),
           });
           broadcastActivity(
             store.appendEvent(
@@ -660,7 +712,9 @@ export function startServer(
                 ? `Main backend set to ${updated.backend}.`
                 : hasClaudeModel
                 ? `Claude model set to ${updated.claude.model}.`
-                : `Claude effort set to ${updated.claude.effort}.`,
+                : hasClaudeEffort
+                ? `Claude effort set to ${updated.claude.effort}.`
+                : `Local pi override set to ${updated.local.piProvider || "(off)"}.`,
             ),
           );
           return json({
@@ -668,6 +722,8 @@ export function startServer(
             raw: updated.backend,
             claudeModel: updated.claude.model,
             claudeEffort: updated.claude.effort,
+            localPiProvider: updated.local.piProvider,
+            localPiModel: updated.local.piModel,
           });
         }
 

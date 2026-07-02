@@ -744,7 +744,9 @@ function render(): void {
           fg: "#B7F7D4",
         }),
         Text({
-          content: `Agent ${state.runtime?.backend ?? state.runtime?.config.model ?? "unknown"}  Active agents ${running}/${
+          content: `Agent ${
+            state.runtime?.backend ?? state.runtime?.config.model ?? "unknown"
+          }  Active agents ${running}/${
             state.runtime?.workflow.maxConcurrentAgents ?? "?"
           }  Project memory ${state.board.projectState.mainThreadId ?? "not started"}`,
           fg: "#8A98A8",
@@ -1124,7 +1126,7 @@ function createFooterActionRows(): FooterAction[][] {
   return [primary, secondary, toggles];
 }
 
-const RESCUE_CYCLE = ["off", "codex", "claude", "local", "pi"] as const;
+const RESCUE_CYCLE = ["off", "codex", "claude", "local"] as const;
 
 function rescueLabel(): string {
   const rescue = state.runtime?.rescue;
@@ -1191,7 +1193,7 @@ function cycleRescueAttempts(): void {
   );
 }
 
-const PLANNER_CYCLE = ["off", "codex", "claude", "local", "pi"] as const;
+const PLANNER_CYCLE = ["off", "codex", "claude", "local"] as const;
 
 function plannerLabel(): string {
   const planner = state.runtime?.planner;
@@ -1227,7 +1229,7 @@ function cyclePlanner(): void {
   );
 }
 
-const SCOUT_CYCLE = ["off", "codex", "claude", "local", "pi"] as const;
+const SCOUT_CYCLE = ["off", "codex", "claude", "local"] as const;
 
 function scoutLabel(): string {
   const scout = state.runtime?.scout;

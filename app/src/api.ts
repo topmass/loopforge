@@ -157,6 +157,16 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ claudeEffort: effort }),
     }),
+  // The local backend's advanced pi provider/model override, same backends
+  // endpoint. Empty strings clear the override (back to the local endpoint).
+  setLocalPi: (patch: { provider?: string; model?: string }) =>
+    jsonFetch<{ localPiProvider: string; localPiModel: string }>("/api/backend", {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...(patch.provider !== undefined ? { localPiProvider: patch.provider } : {}),
+        ...(patch.model !== undefined ? { localPiModel: patch.model } : {}),
+      }),
+    }),
   // Create a new folder inside `path` (the picker's current dir); returns the
   // created absolute path so the picker can navigate straight into it.
   makeDir: (path: string, name: string) =>

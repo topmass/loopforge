@@ -5,7 +5,7 @@
 
 import path from "node:path";
 
-export const AGENT_BACKENDS = ["codex", "pi", "claude", "local"] as const;
+export const AGENT_BACKENDS = ["codex", "claude", "local"] as const;
 
 export type AgentBackend = typeof AGENT_BACKENDS[number];
 
@@ -27,10 +27,11 @@ export interface GlobalConfig {
     endpoint: string;
     model: string;
     apiKey: string;
-  };
-  pi: {
-    provider: string;
-    model: string;
+    // Advanced pi override: when piProvider is set, the local backend routes
+    // through pi's own provider registry (pi.dev) instead of the
+    // LoopForge-managed local endpoint. Empty = use the local endpoint provider.
+    piProvider: string;
+    piModel: string;
   };
   claude: {
     model: string;
@@ -69,7 +70,6 @@ export interface GlobalConfig {
 export interface GlobalConfigPatch {
   backend?: AgentBackend;
   local?: Partial<GlobalConfig["local"]>;
-  pi?: Partial<GlobalConfig["pi"]>;
   claude?: Partial<GlobalConfig["claude"]>;
   rescue?: Partial<GlobalConfig["rescue"]>;
   planner?: Partial<GlobalConfig["planner"]>;
@@ -112,10 +112,8 @@ export function defaultGlobalConfig(): GlobalConfig {
       endpoint: "http://127.0.0.1:8080/v1",
       model: "local-model",
       apiKey: "none",
-    },
-    pi: {
-      provider: "",
-      model: "",
+      piProvider: "",
+      piModel: "",
     },
     claude: {
       model: "claude-sonnet-4-6",
@@ -154,17 +152,25 @@ export function readGlobalConfig(): GlobalConfig {
   } catch {
     return defaults;
   }
+  const local = {
+    endpoint: stringValue(record(parsed.local).endpoint, defaults.local.endpoint),
+    model: stringValue(record(parsed.local).model, defaults.local.model),
+    apiKey: stringValue(record(parsed.local).apiKey, defaults.local.apiKey),
+    piProvider: stringValue(record(parsed.local).piProvider, defaults.local.piProvider),
+    piModel: stringValue(record(parsed.local).piModel, defaults.local.piModel),
+  };
+  // MIGRATION: pre-merge configs had a separate "pi" backend with its own
+  // provider block. Fold that provider into the local backend's advanced pi
+  // override so existing pi routing keeps working now that "pi" is gone as a
+  // picker entry. Only seed when the new field is still unset.
+  if (parsed.backend === "pi" && !local.piProvider) {
+    const legacyPi = record(parsed.pi);
+    local.piProvider = stringValue(legacyPi.provider, "");
+    local.piModel = stringValue(legacyPi.model, "");
+  }
   return {
     backend: normalizeBackend(parsed.backend, defaults.backend),
-    local: {
-      endpoint: stringValue(record(parsed.local).endpoint, defaults.local.endpoint),
-      model: stringValue(record(parsed.local).model, defaults.local.model),
-      apiKey: stringValue(record(parsed.local).apiKey, defaults.local.apiKey),
-    },
-    pi: {
-      provider: stringValue(record(parsed.pi).provider, defaults.pi.provider),
-      model: stringValue(record(parsed.pi).model, defaults.pi.model),
-    },
+    local,
     claude: {
       model: stringValue(record(parsed.claude).model, defaults.claude.model),
       effort: normalizeClaudeEffort(record(parsed.claude).effort, defaults.claude.effort),
@@ -215,7 +221,6 @@ export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
   const next: GlobalConfig = {
     backend: patch.backend ?? current.backend,
     local: { ...current.local, ...patch.local },
-    pi: { ...current.pi, ...patch.pi },
     claude,
     rescue: { ...current.rescue, ...patch.rescue },
     planner: { ...current.planner, ...patch.planner },
@@ -237,14 +242,22 @@ export function describeBackend(config: GlobalConfig): string {
   if (config.backend === "claude") {
     return `claude (${config.claude.model})`;
   }
-  if (config.backend === "local") {
-    return `local via pi (${config.local.model} at ${config.local.endpoint})`;
+  // local runs the pi coding agent. With an advanced pi override it routes
+  // through pi's own provider registry; otherwise it drives the
+  // LoopForge-managed local endpoint provider.
+  if (config.local.piProvider) {
+    const model = [config.local.piProvider, config.local.piModel].filter(Boolean).join("/");
+    return `local via pi (${model})`;
   }
-  const model = [config.pi.provider, config.pi.model].filter(Boolean).join("/");
-  return model ? `pi (${model})` : "pi (pi default model)";
+  return `pi agent, local model ${config.local.model} at ${config.local.endpoint}`;
 }
 
 export function normalizeBackend(value: unknown, fallback: AgentBackend): AgentBackend {
+  // "pi" merged into "local": any legacy pi value (main backend or a role
+  // backend) resolves to local.
+  if (value === "pi") {
+    return "local";
+  }
   return AGENT_BACKENDS.includes(value as AgentBackend) ? value as AgentBackend : fallback;
 }
 

@@ -190,6 +190,11 @@ export interface Runtime {
   config?: { model: string; reasoningEffort: string; fastMode: boolean };
   claudeModel?: string;
   claudeEffort?: string;
+  // The local backend's advanced pi override (blank = local endpoint provider)
+  // and whether the pi coding agent binary is installed (probed once at startup).
+  localPiProvider?: string;
+  localPiModel?: string;
+  piBinary?: { found: boolean; version: string | null };
   activeAgentStatuses?: AgentStatus[];
   externalAgents?: ExternalAgentStatus[];
 }
