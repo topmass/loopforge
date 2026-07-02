@@ -47,10 +47,10 @@ Deno.test("loop signals: complete token, blocked ask, stall fingerprint", () => 
   const same = loopPlanFingerprint(items, "abc123");
   assertEquals(same, loopPlanFingerprint(items, "abc123"));
   assert(same !== loopPlanFingerprint(items, "def456"));
-  assertStringIncludes(loopPlanContract(), "LOOP_PLAN.md");
+  assertStringIncludes(loopPlanContract(), "./lf-task");
   assertStringIncludes(loopPlanContract(), "LOOP_BLOCKED");
-  // The plan is a live Kanban, not a post-hoc changelog: it must teach the
-  // in-progress marker and the changelog ban.
-  assertStringIncludes(loopPlanContract(), "- [~]");
-  assertStringIncludes(loopPlanContract(), "not a changelog");
+  // The plan is a live Kanban the user watches: done requires evidence the
+  // moment it exists, never batch-marked at turn end.
+  assertStringIncludes(loopPlanContract(), './lf-task done <id> --evidence "proof"');
+  assertStringIncludes(loopPlanContract(), "Never batch-mark");
 });

@@ -1,8 +1,8 @@
 import { LOOP_FANOUT_TOKEN } from "./fanout.ts";
-// The goal-loop plan contract: the loop owner maintains LOOP_PLAN.md (a plain
-// markdown checklist) at its worktree root. The file on disk is the source of
-// truth - ralph-style - so a lost thread resumes from the repo, and LoopForge
-// mirrors the checklist onto the board after every turn for live visualization.
+// The goal-loop plan contract: the loop owner tracks its plan as DB-backed
+// items through the per-worktree ./lf-task CLI, so every mutation lands on the
+// board (and its plan.updated feed) the moment it happens. parseLoopPlan stays
+// for reading legacy LOOP_PLAN.md checklists still found in older repos.
 
 export const LOOP_PLAN_FILE = "LOOP_PLAN.md";
 export const LOOP_COMPLETE_TOKEN = "LOOP_COMPLETE";
@@ -60,21 +60,20 @@ export function signalsComplete(responseText: string): boolean {
 
 export function loopPlanContract(maxParallel = 5): string {
   return `Plan contract:
-- Maintain ${LOOP_PLAN_FILE} at the worktree root: a markdown checklist where each line is
-  "- [ ] item" (todo), "- [~] item" (in progress), or "- [x] item -- one-line evidence" (done).
-- If the file does not exist yet, create it now: plan this goal into 3-10 concrete items,
-  each completable in one focused working session.
+- Track ALL work with the ./lf-task CLI at the worktree root:
+  ./lf-task list | ./lf-task add "title" [--spec "one-line what/why/acceptance"] |
+  ./lf-task start <id> | ./lf-task done <id> --evidence "proof" | ./lf-task note <id> "text".
+- If no tasks exist yet, plan this goal into 3-10 concrete items with ./lf-task add, each
+  completable in one focused working session.
+- BEFORE you start building in a turn: make sure every remaining piece of work already exists as a
+  task, and ./lf-task start the ONE item you begin. The user watches this live as a Kanban board -
+  it must always show truthfully what is queued, what you are doing right now, and what is done.
 - Work ONE item per turn (finish a small one and start the next if time allows). Run real
-  commands to verify your work before checking an item off; put the proof in the evidence note.
-- BEFORE you start building in a turn: make sure every remaining piece of work already exists as an
-  unchecked "- [ ]" item, mark the ONE item you are about to do as "- [~]", and SAVE ${LOOP_PLAN_FILE}
-  before you touch any other file. The user watches this file live as a Kanban board - it must always
-  show what is queued ("- [ ]"), what you are doing right now ("- [~]"), and what is done ("- [x]").
-- Never append a new item already checked. A new item enters as "- [ ]" (or "- [~]" if you begin it
-  immediately) and is checked only once its evidence note exists. ${LOOP_PLAN_FILE} is a live plan,
-  not a changelog of work you already finished.
-- Record decisions, discoveries, and anything the next iteration must know directly in
-  ${LOOP_PLAN_FILE} under the relevant item. This file and the repo are your memory.
+  commands to verify your work; done requires proof: ./lf-task done <id> --evidence "proof".
+- Never batch-mark items done at the end of a turn - mark each item done the moment its
+  evidence exists.
+- Record decisions, discoveries, and anything the next iteration must know with ./lf-task note.
+  This plus the repo is your memory - ./lf-task list restores your state after any interruption.
 - Do not create commits; LoopForge commits the worktree after every turn.
 - DEFAULT TO FAN-OUT. As soon as your plan has 2+ items that touch DIFFERENT files or areas
   (disjoint write scopes, no shared files), your FIRST action is to delegate them to parallel
@@ -87,7 +86,7 @@ export function loopPlanContract(maxParallel = 5): string {
   parallel in isolated worktrees, enforces the scopes, merges the results back, and reports a
   summary on your next turn. Keep work inline ONLY when the remaining pieces genuinely share the
   same files (a true conflict) or there is just one piece left.
-- When every item is checked and you believe the win conditions pass, end your reply with the
+- When every item is done and you believe the win conditions pass, end your reply with the
   single line ${LOOP_COMPLETE_TOKEN}.
 - Only when truly blocked by an absolute blocker (credentials, third-party access, destructive
   approval, or a scope-changing product decision), end with:

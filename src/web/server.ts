@@ -80,10 +80,53 @@ export function startServer(
     }
   };
   const broadcastBoard = () => broadcast("board", store.getBoard());
+  // Every event id this process already sent to SSE clients, so the DB tail
+  // below never re-broadcasts them. Pruned each tail tick: once the tail cursor
+  // passes an id it can never be tailed again.
+  const sentEventIds = new Set<number>();
   const broadcastActivity = (event: ActivityEvent) => {
+    sentEventIds.add(event.id);
     broadcast("activity", event);
     broadcastBoard();
   };
+  // Other processes (the lf-task CLI, a second LoopForge) append events to the
+  // same SQLite DB, but only this process holds the SSE clients. Tail the events
+  // table and broadcast whatever this process did not send itself, through the
+  // same broadcastActivity path the GUI already parses (lifecycle included).
+  // The cursor starts at the current max id so history never replays.
+  let tailCursor = Number(
+    (store.db.prepare("SELECT MAX(id) AS id FROM events").get() as { id: number | null }).id ?? 0,
+  );
+  const tailTimer = setInterval(() => {
+    try {
+      const rows = store.db.prepare(
+        "SELECT * FROM events WHERE id > ? ORDER BY id ASC",
+      ).all(tailCursor) as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const event: ActivityEvent = {
+          id: Number(row.id),
+          taskId: row.task_id === null ? null : String(row.task_id),
+          runId: row.run_id === null ? null : String(row.run_id),
+          role: String(row.role),
+          kind: String(row.kind),
+          message: String(row.message),
+          createdAt: String(row.created_at),
+          rawJson: row.raw_json === null ? null : String(row.raw_json),
+        };
+        tailCursor = event.id;
+        if (!sentEventIds.has(event.id)) {
+          broadcastActivity(event);
+        }
+      }
+      for (const id of sentEventIds) {
+        if (id <= tailCursor) {
+          sentEventIds.delete(id);
+        }
+      }
+    } catch {
+      // A tail tick must never take the server down; retry on the next tick.
+    }
+  }, 1_000);
   const supervisorTimer = setInterval(() => {
     for (const event of store.markStaleAgentStatuses(120_000)) {
       broadcastActivity(event);
@@ -1217,13 +1260,16 @@ export function startServer(
     url: `http://127.0.0.1:${port}`,
     shutdown: () => {
       clearInterval(supervisorTimer);
+      clearInterval(tailTimer);
       abort.abort();
     },
     finished: server.finished.then(() => {
       clearInterval(supervisorTimer);
+      clearInterval(tailTimer);
       store.close();
     }).catch(() => {
       clearInterval(supervisorTimer);
+      clearInterval(tailTimer);
       store.close();
     }),
   };

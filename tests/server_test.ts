@@ -841,6 +841,7 @@ class LoopStubClient implements CodexClient {
         message: string;
       },
     ) => void,
+    private readonly root: string,
   ) {}
 
   startSession(cwd: string): Promise<CodexSession> {
@@ -851,11 +852,17 @@ class LoopStubClient implements CodexClient {
     return Promise.resolve({ threadId, cwd });
   }
 
-  async runTurn(session: CodexSession, _input: CodexTurnInput): Promise<CodexTurnResult> {
-    await Deno.writeTextFile(
-      `${session.cwd}/LOOP_PLAN.md`,
-      "# Plan\n- [x] Ship the gadget -- wrote gadget.txt\n",
-    );
+  async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    // Simulate the model's ./lf-task calls with a second store connection (the
+    // real CLI is a separate process writing to the same DB).
+    const goalId = input.title.split(":")[0];
+    const store = new BoardStore(this.root);
+    try {
+      const item = store.addLoopPlanItem(goalId, "Ship the gadget");
+      store.setLoopPlanItemStatus(goalId, item.id, "done", "wrote gadget.txt");
+    } finally {
+      store.close();
+    }
     await Deno.writeTextFile(`${session.cwd}/gadget.txt`, "gadget\n");
     this.onEvent({
       taskId: null,
@@ -887,7 +894,7 @@ Deno.test("server runs a goal loop in the background until the goal closes", asy
   seed.close();
   const port = 49633 + Math.floor(Math.random() * 300);
   const server = startServer(root, port, {
-    createCodexClient: (onEvent) => new LoopStubClient(onEvent),
+    createCodexClient: (onEvent) => new LoopStubClient(onEvent, root),
   });
   try {
     const start = await fetch(`${server.url}/api/goals/${goal.id}/loop`, {
@@ -919,10 +926,6 @@ Deno.test("server runs a goal loop in the background until the goal closes", asy
 class OneStepLoopStubClient extends TestCodexClient {
   override async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
     if (/: loop \d+$/.test(input.title)) {
-      await Deno.writeTextFile(
-        `${session.cwd}/LOOP_PLAN.md`,
-        "# Plan\n- [x] Ship the gizmo -- wrote gizmo.txt\n",
-      );
       await Deno.writeTextFile(`${session.cwd}/gizmo.txt`, "gizmo\n");
       this.onEvent({
         taskId: null,
@@ -1019,10 +1022,6 @@ class DeferredPlanLoopClient extends TestCodexClient {
       };
     }
     if (/: loop \d+$/.test(input.title)) {
-      await Deno.writeTextFile(
-        `${session.cwd}/LOOP_PLAN.md`,
-        "# Plan\n- [x] Ship the widget -- wrote widget.txt\n",
-      );
       await Deno.writeTextFile(`${session.cwd}/widget.txt`, "widget\n");
       this.onEvent({
         taskId: null,
@@ -1134,6 +1133,73 @@ Deno.test("adding a task to a goal steers it and emits task.added", async () => 
     const board = await fetch(`${server.url}/api/board`).then((r) => r.json());
     void board;
   } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("server tails DB events from other processes onto SSE exactly once", async () => {
+  const root = Deno.makeTempDirSync();
+  const boot = new BoardStore(root);
+  boot.initProject();
+  boot.close();
+  const port = 51233 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  const received: Array<{ message: string }> = [];
+  const sse = await fetch(`${server.url}/api/events`);
+  const reader = sse.body!.getReader();
+  const decoder = new TextDecoder();
+  // Collect only the "activity" SSE frames; board frames also carry the event
+  // text, so counting raw substrings would overcount.
+  const pump = (async () => {
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        let split;
+        while ((split = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          if (frame.startsWith("event: activity\n")) {
+            received.push(JSON.parse(frame.slice(frame.indexOf("data: ") + 6)));
+          }
+        }
+      }
+    } catch {
+      // The stream ends when the server shuts down.
+    }
+  })();
+  try {
+    // A server-originated event: broadcast in-process, and it must NOT be
+    // re-broadcast by the tail.
+    const patched = await fetch(`${server.url}/api/pushbranches`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    assertEquals(patched.ok, true);
+    await patched.json();
+    // Another process (the lf-task CLI) appends to the same DB; the tail must
+    // deliver it to SSE clients.
+    const cli = new BoardStore(root);
+    cli.appendEvent(null, null, "plan", "task", "tail-probe from another process");
+    cli.close();
+    // The tail polls every 1s; 1.5s covers a full tick with margin.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const tailed = received.filter((e) => e.message === "tail-probe from another process");
+    assertEquals(tailed.length, 1);
+    const local = received.filter((e) => e.message.includes("branch pushing off"));
+    assertEquals(local.length, 1);
+  } finally {
+    await reader.cancel().catch(() => {});
+    await pump;
     server.shutdown();
     await server.finished.catch(() => {});
     await Deno.remove(root, { recursive: true }).catch(() => {});

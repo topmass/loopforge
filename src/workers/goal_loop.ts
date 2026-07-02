@@ -1,8 +1,9 @@
 // The LoopForge goal loop: one persistent agent session owns a whole goal in
-// the goal's worktree, maintaining its own plan (LOOP_PLAN.md) that LoopForge
-// mirrors live onto the board. The shell stays deterministic - it commits
-// progress after every turn, injects queued messages and probe results,
-// detects stalls, and gates completion behind the goal's win-condition probes.
+// the goal's worktree, tracking its plan as DB items through the per-worktree
+// ./lf-task CLI; the store emits plan.updated on every mutation so the board
+// follows live. The shell stays deterministic - it commits progress after
+// every turn, injects queued messages and probe results, detects stalls, and
+// gates completion behind the goal's win-condition probes.
 // Identical control flow on every backend; this is the unified replacement for
 // the per-task relay.
 
@@ -11,7 +12,6 @@ import { BoardStore } from "../board/store.ts";
 import { ActivityEvent, ActivityEventInput, Goal } from "../board/types.ts";
 import { autonomyContract, RunMode } from "../board/prompts.ts";
 import { readGlobalConfig } from "../board/global_config.ts";
-import { planUpdated } from "../board/lifecycle.ts";
 import { createAgentClient } from "./agent_backend.ts";
 import { CodexClient, CodexSession } from "./codex_app_server.ts";
 import { isMissingCodexThreadText } from "./codex_event_normalizer.ts";
@@ -33,14 +33,13 @@ import {
   summarizeFanout,
 } from "./fanout.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
+import { writeTaskWorkspace } from "./task_workspace.ts";
 import {
   extractBlockedAsk,
   LOOP_PLAN_FILE,
   loopPlanComplete,
   loopPlanContract,
   loopPlanFingerprint,
-  LoopPlanItem,
-  parseLoopPlan,
   signalsComplete,
 } from "./loop_plan.ts";
 
@@ -73,10 +72,6 @@ export class GoalLoopRunner {
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
   private readonly runMode: RunMode;
-  // The last plan snapshot the board reflects. Both the live mirror and the
-  // turn-end sync update it so an unchanged plan never re-emits. One-shot per
-  // run() (a fresh runner per goal loop), so no reset is needed.
-  private lastPlanKey = "";
 
   constructor(
     private readonly root: string,
@@ -129,6 +124,9 @@ export class GoalLoopRunner {
         `Cleared a previous goal's ${LOOP_PLAN_FILE} inherited from the repo.`,
       );
     }
+    // Plant the .loopforge-goal.json pointer + ./lf-task shim so the model can
+    // track its plan through the task CLI from inside the worktree.
+    await writeTaskWorkspace(this.root, goalId, assignment.worktreePath);
     const projectInstructions = await collectAgentsInstructions(this.root);
 
     // A win condition already green before any work cannot prove new work. Run
@@ -199,7 +197,7 @@ export class GoalLoopRunner {
           }`,
         );
         responseText = "";
-        const planExists = await this.planFileExists(assignment.worktreePath);
+        const planExists = this.store.listLoopPlanItems(goalId).length > 0;
         // Clarify-first: only on the very first turn, before any plan, and only
         // until the user has answered (queued answers turn it into planning).
         const doClarify = Boolean(this.options.questionMode) && iteration === 1 &&
@@ -214,11 +212,9 @@ export class GoalLoopRunner {
             objective: currentObjective,
           });
         probeFeedback = "";
-        // Mirror the plan file live while the (minutes-long) turn runs so the
-        // board shows queued/in-progress work, not just a teleport to Done at
-        // turn end. The finally stops it on every path: success, the session-lost
-        // continue, and a rethrow.
-        const stopMirror = this.startPlanMirror(goalId, assignment.worktreePath);
+        // Snapshot the plan so the turn end can tell whether the model recorded
+        // any task progress alongside its file changes.
+        const planBefore = planKey(this.store.listLoopPlanItems(goalId));
         try {
           await codex.runTurn(session, {
             title: `${goalId}: loop ${iteration}`,
@@ -235,8 +231,6 @@ export class GoalLoopRunner {
             continue;
           }
           throw error;
-        } finally {
-          stopMirror();
         }
         // Clarify turn: surface the agent's questions and stop. Answering in
         // chat re-runs the loop with the answers queued, so it plans next time.
@@ -260,8 +254,17 @@ export class GoalLoopRunner {
           assignment.worktreePath,
           `${goalId} loop iteration ${iteration}`,
         );
-        const items = parseLoopPlan(await this.readPlanFile(assignment.worktreePath));
-        this.mirrorPlan(goalId, items);
+        // ./lf-task mutations already emitted plan.updated as they happened; the
+        // shell only checks that file changes came with recorded task progress.
+        // probeFeedback is empty here (reset before the turn), and every later
+        // branch that sets feedback deliberately overwrites this nudge.
+        const items = this.store.listLoopPlanItems(goalId);
+        if (commit && planKey(items) === planBefore) {
+          probeFeedback =
+            "You changed files this turn but recorded no task progress. Track your work: " +
+            "./lf-task add for new work, ./lf-task start before working an item, " +
+            './lf-task done <id> --evidence "proof" when it is verified.';
+        }
 
         if (wrapUp) {
           const reason = wrapUp === "tokens"
@@ -376,8 +379,8 @@ export class GoalLoopRunner {
           stalls++;
           if (stalls === 1) {
             probeFeedback =
-              "The last iteration produced no plan progress and no file changes. Re-read " +
-              `${LOOP_PLAN_FILE}, pick the smallest next step on the next unchecked item, and act.`;
+              "The last iteration produced no plan progress and no file changes. Run " +
+              "./lf-task list, pick the smallest next step on the next unfinished item, and act.";
           }
           if (stalls > STALL_LIMIT) {
             this.emitEvent(goalId, "stalled", "No progress across consecutive iterations.");
@@ -435,10 +438,7 @@ export class GoalLoopRunner {
       summary: evidence,
       data: { total: summary.total, passed: summary.passed },
     }));
-    const plan = parseLoopPlan(
-      await this.readPlanFile(this.store.getGoal(goalId).loopWorktree ?? this.root),
-    );
-    const manualNotes = plan
+    const manualNotes = this.store.listLoopPlanItems(goalId)
       .map((item) => `${item.title}: ${item.note}`)
       .filter((line) => /needs manual verification/i.test(line));
     if (this.runMode === "attended" && manualNotes.length) {
@@ -558,7 +558,7 @@ plan yet. End your reply with a line containing only: LOOP_QUESTIONS`;
   ): string {
     const probes = this.store.listProbes(goal.id);
     const addedBlock = addedTasks.length
-      ? `\nAdditional tasks the user attached to this goal - include each as a plan item:\n${
+      ? `\nAdditional tasks the user attached to this goal - add each as a task with ./lf-task add:\n${
         addedTasks.map((t) => `- ${t}`).join("\n")
       }\n`
       : "";
@@ -590,10 +590,10 @@ ${projectInstructions}
 
 ${loopPlanContract(readGlobalConfig().maxParallelAgents)}
 
-Begin now: create ${LOOP_PLAN_FILE}. Then look at your plan - if it has 2+ items that touch
-different files or areas, immediately fan them out to parallel sub-agents (${LOOP_FANOUT_TOKEN})
-this turn rather than building them yourself. Only build inline when there is a single piece or the
-pieces share files.`;
+Begin now: break the goal into 3-10 concrete items with ./lf-task add "<title>" --spec "<one-line
+what/why/acceptance>". Then look at your plan - if it has 2+ items that touch different files or
+areas, immediately fan them out to parallel sub-agents (${LOOP_FANOUT_TOKEN}) this turn rather than
+building them yourself. Only build inline when there is a single piece or the pieces share files.`;
   }
 
   private buildContinuationPrompt(
@@ -605,30 +605,32 @@ pieces share files.`;
       objective?: string;
     } = {},
   ): string {
-    // New user messages are treated as added tasks: the agent folds each into
-    // LOOP_PLAN.md as a real plan item WITH a one-line spec, so the Kanban card
-    // is populated inline - no separate spec-writer agent (which would burn a
-    // slot a local model may not have).
+    // New user messages are treated as added tasks: the agent records each as a
+    // real task WITH a one-line spec, so the Kanban card is populated inline -
+    // no separate spec-writer agent (which would burn a slot a local model may
+    // not have).
     const tasksBlock = queuedMessages.length
-      ? `\nNew tasks/direction from the user - fold EACH into ${LOOP_PLAN_FILE} as a new unchecked item, and on the line below it record a one-line spec (what / why / acceptance) so it is fully described, then work the plan:\n${
+      ? `\nNew tasks/direction from the user - add EACH as a task with ./lf-task add "..." --spec "one-line what/why/acceptance", then work the plan:\n${
         queuedMessages.map((m) => `- ${m}`).join("\n")
       }\n`
       : "";
     const objectiveBlock = steer.objectiveChanged
-      ? `\nThe goal objective was edited. Re-read it and reconcile ${LOOP_PLAN_FILE} with the new objective:\n${
+      ? `\nThe goal objective was edited. Re-read it and reconcile your task list (./lf-task list) with the new objective:\n${
         steer.objective ?? ""
       }\n`
       : "";
     if (steer.wrapUp) {
       return `The ${steer.wrapUp} budget for this run is spent. This is your final turn.
-Do NOT start new work. Finish the smallest safe stopping point for the in-progress item, make sure the worktree is in a consistent state, and update ${LOOP_PLAN_FILE}: mark done what is genuinely done and leave the rest unchecked with a short note on what remains.
+Do NOT start new work. Finish the smallest safe stopping point for the in-progress item, make sure the worktree is in a consistent state, then update the task list: mark genuinely-finished items done with ./lf-task done <id> --evidence "proof", and leave the rest with a ./lf-task note on what remains.
 ${tasksBlock}${objectiveBlock}Do not output LOOP_COMPLETE unless every item is genuinely finished.`;
     }
-    return `Continue the loop. Read ${LOOP_PLAN_FILE}, work the next item, verify it with real commands, and update the file.
+    return `Continue the loop. Run ./lf-task list to see the plan state, start the next item (./lf-task start <id>), work it, verify with real commands, then ./lf-task done <id> --evidence "proof".
 ${tasksBlock}${objectiveBlock}${probeFeedback ? `\n${probeFeedback}\n` : ""}
-End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> only for a true absolute blocker.`;
+End with LOOP_COMPLETE only when every item is done, or LOOP_BLOCKED: <ask> only for a true absolute blocker.`;
   }
 
+  // Only the legacy clearing block above still cares about the plan FILE; the
+  // live plan is the DB items.
   private async planFileExists(worktreePath: string): Promise<boolean> {
     try {
       await Deno.stat(path.join(worktreePath, LOOP_PLAN_FILE));
@@ -636,56 +638,6 @@ End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> o
     } catch {
       return false;
     }
-  }
-
-  private async readPlanFile(worktreePath: string): Promise<string> {
-    try {
-      return await Deno.readTextFile(path.join(worktreePath, LOOP_PLAN_FILE));
-    } catch {
-      return "";
-    }
-  }
-
-  // Sync the parsed plan onto the board and emit plan.updated, but only when the
-  // plan changed since the last emit. Shared by the turn-end path and the live
-  // mirror so the same content never emits twice (the mirror's final tick and
-  // the turn-end call collapse to one). syncLoopPlanTasks and appendLifecycleEvent
-  // are synchronous SQLite calls on this single-threaded event loop, so the
-  // mirror and turn-end never interleave mid-write - no locking concern.
-  private mirrorPlan(goalId: string, items: LoopPlanItem[]): void {
-    const key = items.map((item) => `${item.status}|${item.title}`).join(";");
-    if (!items.length || key === this.lastPlanKey) {
-      return;
-    }
-    this.lastPlanKey = key;
-    for (const event of this.store.syncLoopPlanTasks(goalId, items)) {
-      this.emit(event);
-    }
-    this.emit(this.store.appendLifecycleEvent(planUpdated(goalId, items)));
-  }
-
-  // Poll LOOP_PLAN.md every 3s while a turn runs so the board mirrors the plan
-  // live. Polling (not Deno.watchFs) survives editor renames and writes from any
-  // tool. Errors in a tick are swallowed - mirroring must never break the loop.
-  // Returns an idempotent stopper the turn's finally always calls.
-  private startPlanMirror(goalId: string, worktreePath: string): () => void {
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async () => {
-      try {
-        this.mirrorPlan(goalId, parseLoopPlan(await this.readPlanFile(worktreePath)));
-      } catch {
-        // A mirror tick must never break the loop; swallow and keep polling.
-      }
-      if (!stopped) {
-        timer = setTimeout(tick, 3_000);
-      }
-    };
-    timer = setTimeout(tick, 3_000);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
   }
 
   private finish(
@@ -705,6 +657,12 @@ End with LOOP_COMPLETE only when every item is checked, or LOOP_BLOCKED: <ask> o
   private emit(event: ActivityEvent): void {
     this.options.onEvent?.(event);
   }
+}
+
+// One string per plan item covering id, status, and note: the compliance nudge
+// compares this before/after a turn to see whether the model recorded progress.
+function planKey(items: Array<{ id: string; status: string; note: string }>): string {
+  return items.map((item) => `${item.id}|${item.status}|${item.note}`).join(";");
 }
 
 // The clarify turn's questions are everything before the LOOP_QUESTIONS marker.
