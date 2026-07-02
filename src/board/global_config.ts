@@ -9,6 +9,19 @@ export const AGENT_BACKENDS = ["codex", "pi", "claude", "local"] as const;
 
 export type AgentBackend = typeof AGENT_BACKENDS[number];
 
+// Claude runs through pi, whose CLI exposes `--thinking <level>` with its own
+// ladder (distinct from codex's reasoning effort). Verified against `pi --help`.
+export const CLAUDE_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
+export type ClaudeThinking = typeof CLAUDE_THINKING_LEVELS[number];
+
 export interface GlobalConfig {
   backend: AgentBackend;
   local: {
@@ -22,6 +35,7 @@ export interface GlobalConfig {
   };
   claude: {
     model: string;
+    thinking: string;
   };
   rescue: {
     enabled: boolean;
@@ -106,6 +120,7 @@ export function defaultGlobalConfig(): GlobalConfig {
     },
     claude: {
       model: "claude-sonnet-4-6",
+      thinking: "high",
     },
     rescue: {
       enabled: false,
@@ -153,6 +168,7 @@ export function readGlobalConfig(): GlobalConfig {
     },
     claude: {
       model: stringValue(record(parsed.claude).model, defaults.claude.model),
+      thinking: normalizeClaudeThinking(record(parsed.claude).thinking, defaults.claude.thinking),
     },
     rescue: {
       enabled: record(parsed.rescue).enabled === true,
@@ -194,11 +210,14 @@ function clampAgents(value: number): number {
 
 export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
   const current = readGlobalConfig();
+  // Re-normalize the patched thinking level so an invalid value can't be persisted.
+  const claude = { ...current.claude, ...patch.claude };
+  claude.thinking = normalizeClaudeThinking(claude.thinking, defaultGlobalConfig().claude.thinking);
   const next: GlobalConfig = {
     backend: patch.backend ?? current.backend,
     local: { ...current.local, ...patch.local },
     pi: { ...current.pi, ...patch.pi },
-    claude: { ...current.claude, ...patch.claude },
+    claude,
     rescue: { ...current.rescue, ...patch.rescue },
     planner: { ...current.planner, ...patch.planner },
     reviewer: { ...current.reviewer, ...patch.reviewer },
@@ -228,6 +247,10 @@ export function describeBackend(config: GlobalConfig): string {
 
 export function normalizeBackend(value: unknown, fallback: AgentBackend): AgentBackend {
   return AGENT_BACKENDS.includes(value as AgentBackend) ? value as AgentBackend : fallback;
+}
+
+export function normalizeClaudeThinking(value: unknown, fallback: string): string {
+  return CLAUDE_THINKING_LEVELS.includes(value as ClaudeThinking) ? value as string : fallback;
 }
 
 function record(value: unknown): Record<string, unknown> {

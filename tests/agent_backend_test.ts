@@ -13,7 +13,7 @@ import {
   LOCAL_PI_PROVIDER_ID,
 } from "../src/workers/agent_backend.ts";
 import { CodexAppServerClient } from "../src/workers/codex_app_server.ts";
-import { PiRpcClient } from "../src/workers/pi_rpc_client.ts";
+import { PiRpcClient, PiRpcClientOptions } from "../src/workers/pi_rpc_client.ts";
 
 function withTempHome(fn: () => void): void {
   const home = Deno.makeTempDirSync();
@@ -70,6 +70,23 @@ Deno.test("agent client factory selects the configured backend", () => {
       } finally {
         Deno.env.delete("LOOPFORGE_PI_MODELS_PATH");
       }
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+});
+
+Deno.test("claude backend threads the configured thinking level into the pi client", () => {
+  withTempHome(() => {
+    const root = Deno.makeTempDirSync();
+    try {
+      updateGlobalConfig({ backend: "claude", claude: { thinking: "low" } });
+      const client = createAgentClient(root, () => {});
+      assert(client instanceof PiRpcClient);
+      const options = (client as unknown as { options: PiRpcClientOptions }).options;
+      assertEquals(options.provider, "anthropic");
+      assertEquals(options.model, readGlobalConfig().claude.model);
+      assertEquals(options.thinking, "low");
     } finally {
       Deno.removeSync(root, { recursive: true });
     }

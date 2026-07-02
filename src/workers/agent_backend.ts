@@ -28,6 +28,7 @@ export function createAgentClient(
     return new PiRpcClient(onEvent, {
       provider: "anthropic",
       model: config.claude.model,
+      thinking: config.claude.thinking,
     });
   }
   if (config.backend === "local") {

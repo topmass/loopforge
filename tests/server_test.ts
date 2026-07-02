@@ -1317,3 +1317,199 @@ Deno.test("native codex events ingest into the lifecycle feed", async () => {
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test("server folder picker lists directories for add-project browsing", async () => {
+  const root = Deno.makeTempDirSync();
+  const port = 51833 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  // A tree with two real dirs, a dot-dir, a plain file, and a .git inside one
+  // child - so the picker skips dot-dirs + files and flags the repo.
+  const tree = Deno.makeTempDirSync();
+  Deno.mkdirSync(`${tree}/alpha`);
+  Deno.mkdirSync(`${tree}/beta`);
+  Deno.mkdirSync(`${tree}/beta/.git`);
+  Deno.mkdirSync(`${tree}/.hidden`);
+  Deno.writeTextFileSync(`${tree}/notes.txt`, "x");
+  try {
+    const listed = await fetch(`${server.url}/api/fs/dirs?path=${encodeURIComponent(tree)}`)
+      .then((r) => r.json());
+    // Directories only, dot-dir skipped, sorted by name.
+    assertEquals(listed.dirs.map((d: { name: string }) => d.name), ["alpha", "beta"]);
+    const alpha = listed.dirs.find((d: { name: string }) => d.name === "alpha");
+    const beta = listed.dirs.find((d: { name: string }) => d.name === "beta");
+    assertEquals(alpha.hasGit, false);
+    assertEquals(beta.hasGit, true);
+    assertEquals(listed.path, tree);
+    assertEquals(listed.parent, path.dirname(tree));
+
+    // Navigating into a child returns that dir with its parent set back to tree.
+    const child = await fetch(
+      `${server.url}/api/fs/dirs?path=${encodeURIComponent(`${tree}/beta`)}`,
+    ).then((r) => r.json());
+    assertEquals(child.path, `${tree}/beta`);
+    assertEquals(child.parent, tree);
+
+    // A file path is rejected.
+    const fileRes = await fetch(
+      `${server.url}/api/fs/dirs?path=${encodeURIComponent(`${tree}/notes.txt`)}`,
+    );
+    assertEquals(fileRes.status, 400);
+    await fileRes.json();
+
+    // A relative path is rejected.
+    const relRes = await fetch(
+      `${server.url}/api/fs/dirs?path=${encodeURIComponent("relative/dir")}`,
+    );
+    assertEquals(relRes.status, 400);
+    await relRes.json();
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await Deno.remove(tree, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("server patches the machine-wide Claude model through the backends endpoint", async () => {
+  const root = Deno.makeTempDirSync();
+  const port = 52133 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    const patched = await fetch(`${server.url}/api/backend`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ claudeModel: "claude-opus-4-8" }),
+    }).then((r) => r.json());
+    assertEquals(patched.claudeModel, "claude-opus-4-8");
+
+    // The runtime surface exposes it so the settings modal can seed the picker.
+    const runtime = await fetch(`${server.url}/api/runtime`).then((r) => r.json());
+    assertEquals(runtime.claudeModel, "claude-opus-4-8");
+
+    // The Claude thinking level round-trips through the same endpoint.
+    const thinking = await fetch(`${server.url}/api/backend`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ claudeThinking: "low" }),
+    }).then((r) => r.json());
+    assertEquals(thinking.claudeThinking, "low");
+    const runtime2 = await fetch(`${server.url}/api/runtime`).then((r) => r.json());
+    assertEquals(runtime2.claudeThinking, "low");
+
+    // An unknown thinking level is a 400.
+    const badThinking = await fetch(`${server.url}/api/backend`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ claudeThinking: "turbo" }),
+    });
+    assertEquals(badThinking.status, 400);
+    await badThinking.json();
+
+    // Neither field present is a 400.
+    const empty = await fetch(`${server.url}/api/backend`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assertEquals(empty.status, 400);
+    await empty.json();
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("server creates a new folder from the picker and rejects bad requests", async () => {
+  const root = Deno.makeTempDirSync();
+  const port = 52333 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  const tree = Deno.makeTempDirSync();
+  try {
+    // Happy path: creates tree/fresh and returns its absolute path.
+    const made = await fetch(`${server.url}/api/fs/mkdir`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: tree, name: "fresh" }),
+    }).then((r) => r.json());
+    assertEquals(made.path, path.join(tree, "fresh"));
+    assertEquals(Deno.statSync(made.path).isDirectory, true);
+
+    // Re-creating the same folder is a 400 (target already exists).
+    const dup = await fetch(`${server.url}/api/fs/mkdir`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: tree, name: "fresh" }),
+    });
+    assertEquals(dup.status, 400);
+    await dup.json();
+
+    // A name containing a path separator is a 400.
+    const slash = await fetch(`${server.url}/api/fs/mkdir`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: tree, name: "a/b" }),
+    });
+    assertEquals(slash.status, 400);
+    await slash.json();
+
+    // A relative parent is a 400.
+    const rel = await fetch(`${server.url}/api/fs/mkdir`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "relative/dir", name: "x" }),
+    });
+    assertEquals(rel.status, 400);
+    await rel.json();
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await Deno.remove(tree, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("server removes a registered project and refuses to remove its own root", async () => {
+  const root = Deno.makeTempDirSync();
+  const other = Deno.makeTempDirSync();
+  const port = 52533 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    // Register a second project, then remove it via DELETE.
+    await fetch(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root: other }),
+    }).then((r) => r.json());
+    const removed = await fetch(`${server.url}/api/projects`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root: other }),
+    }).then((r) => r.json());
+    assert(!removed.projects.some((p: { root: string }) => p.root === other));
+
+    // Removing the server's own root is a 400 and leaves it registered.
+    const self = await fetch(`${server.url}/api/projects`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root }),
+    });
+    assertEquals(self.status, 400);
+    await self.json();
+    const listed = await fetch(`${server.url}/api/projects`).then((r) => r.json());
+    assert(listed.projects.some((p: { root: string }) => p.root === root));
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await Deno.remove(other, { recursive: true }).catch(() => {});
+  }
+});

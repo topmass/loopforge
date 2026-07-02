@@ -2,7 +2,21 @@ import { assert, assertEquals, assertNotEquals, assertStringIncludes } from "@st
 import { BoardStore } from "../src/board/store.ts";
 import { ActivityEventInput } from "../src/board/types.ts";
 import { LoopForgeWorker } from "../src/workers/loopforge_worker.ts";
-import { PiRpcClient } from "../src/workers/pi_rpc_client.ts";
+import { piRpcArgs, PiRpcClient } from "../src/workers/pi_rpc_client.ts";
+
+Deno.test("piRpcArgs appends provider, model, and thinking flags only when set", () => {
+  const args = piRpcArgs({ provider: "anthropic", model: "claude-sonnet-4-6", thinking: "high" });
+  assertEquals(args[args.indexOf("--provider") + 1], "anthropic");
+  assertEquals(args[args.indexOf("--model") + 1], "claude-sonnet-4-6");
+  assertEquals(args[args.indexOf("--thinking") + 1], "high");
+
+  // Omitted options add no flag; the rpc-mode base args survive.
+  const bare = piRpcArgs({});
+  assert(bare.includes("--mode"));
+  assert(bare.includes("rpc"));
+  assert(!bare.includes("--thinking"));
+  assert(!bare.includes("--provider"));
+});
 
 function fakePiCommand(): string[] {
   return [

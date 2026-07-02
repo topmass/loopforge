@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "./store";
 import { api, subscribe } from "./api";
 import { workerChips, type WorkerChip } from "./agent_status";
-import type { PlanStep, ProjectEntry } from "./types";
+import type { DirEntry, PlanStep, ProjectEntry } from "./types";
 
 // Shared spring - the soft, slightly bouncy motion of a calm home menu.
 const spring = { type: "spring", stiffness: 320, damping: 30 } as const;
@@ -201,6 +201,18 @@ function StatusStrip({ onSettings }: { onSettings: () => void }) {
 }
 
 const BACKENDS = ["codex", "claude", "local", "pi"] as const;
+// The real ReasoningEffort union from src/board/store.ts - keep in sync.
+const REASONING = ["low", "medium", "high", "xhigh"] as const;
+// Claude's thinking ladder via pi --thinking (see CLAUDE_THINKING_LEVELS in
+// src/board/global_config.ts). Distinct from codex's reasoning effort.
+const CLAUDE_THINKING = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+// Common Claude models offered in the picker; "other..." reveals a free-text box.
+const CLAUDE_MODELS = [
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+  "claude-haiku-4-5",
+  "claude-sonnet-4-6",
+] as const;
 
 // Model routing settings - the same knobs the TUI exposed (main backend +
 // rescue / planner / scout), live-editable via the config PATCH endpoints.
@@ -208,6 +220,9 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const runtime = useStore((s) => s.runtime);
   const setRuntime = useStore((s) => s.setRuntime);
   const [saving, setSaving] = useState<string | null>(null);
+  // Whether the Claude picker is showing its free-text box (an unknown model, or
+  // the user explicitly chose "other...").
+  const [claudeOther, setClaudeOther] = useState(false);
 
   const refresh = async () => setRuntime(await api.runtime());
 
@@ -309,6 +324,139 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             void wrap("scout", () =>
               api.setScout(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
         />
+
+        {/* Model power: codex knobs (per-project) + the Claude model (machine-wide). */}
+        <div className="border-b border-slate-200 py-3">
+          <div className="text-sm font-medium text-slate-800">Model power</div>
+          <div className="text-xs text-slate-500">
+            How hard the models think. codex is per-project; claude is machine-wide.
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              codex
+            </div>
+            <input
+              key={runtime?.config?.model ?? ""}
+              defaultValue={runtime?.config?.model ?? ""}
+              placeholder="model id (e.g. gpt-5.4)"
+              onBlur={(e) =>
+                void wrap("codex model", () => api.setConfig({ model: e.target.value.trim() }))}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+            />
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-xs text-slate-500">reasoning</span>
+              <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                {REASONING.map((r) => {
+                  const on = runtime?.config?.reasoningEffort === r;
+                  return (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() =>
+                        void wrap("reasoning", () => api.setConfig({ reasoningEffort: r }))}
+                      className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
+                        on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {r}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-xs text-slate-500">speed</span>
+              <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                {([["fast", true], ["normal", false]] as const).map(([label, fast]) => {
+                  const on = !!runtime?.config?.fastMode === fast;
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() =>
+                        void wrap("speed", () => api.setConfig({ fastMode: fast }))}
+                      className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
+                        on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              claude
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-xs text-slate-500">model</span>
+              <select
+                value={claudeOther ||
+                    !CLAUDE_MODELS.includes((runtime?.claudeModel ?? "") as typeof CLAUDE_MODELS[number])
+                  ? "other"
+                  : runtime?.claudeModel}
+                onChange={(e) => {
+                  if (e.target.value === "other") {
+                    setClaudeOther(true);
+                    return;
+                  }
+                  setClaudeOther(false);
+                  void wrap("claude model", () => api.setClaudeModel(e.target.value));
+                }}
+                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+              >
+                {CLAUDE_MODELS.map((m) => <option key={m} value={m} className="bg-white">{m}</option>)}
+                <option value="other" className="bg-white">other...</option>
+              </select>
+            </div>
+            {(claudeOther ||
+              !CLAUDE_MODELS.includes(
+                (runtime?.claudeModel ?? "") as typeof CLAUDE_MODELS[number],
+              )) && (
+              <input
+                key={runtime?.claudeModel ?? ""}
+                defaultValue={CLAUDE_MODELS.includes(
+                    (runtime?.claudeModel ?? "") as typeof CLAUDE_MODELS[number],
+                  )
+                  ? ""
+                  : runtime?.claudeModel ?? ""}
+                placeholder="model id"
+                onBlur={(e) =>
+                  e.target.value.trim() &&
+                  void wrap("claude model", () => api.setClaudeModel(e.target.value.trim()))}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+              />
+            )}
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-xs text-slate-500">thinking</span>
+              <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                {CLAUDE_THINKING.map((t) => {
+                  const on = runtime?.claudeThinking === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() =>
+                        void wrap("claude thinking", () => api.setClaudeThinking(t))}
+                      className={`flex-1 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
+                        on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-400">
+              thinking maps to Claude reasoning effort via pi; fast mode is codex-only for now
+            </div>
+          </div>
+        </div>
 
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 py-3">
           <div>
@@ -451,6 +599,29 @@ function Sidebar() {
   const [pathInput, setPathInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Which project row is armed for removal, plus its auto-disarm timer.
+  const [armed, setArmed] = useState<string | null>(null);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disarm = () => {
+    if (armTimer.current) clearTimeout(armTimer.current);
+    setArmed(null);
+  };
+  const arm = (root: string) => {
+    if (armTimer.current) clearTimeout(armTimer.current);
+    setArmed(root);
+    armTimer.current = setTimeout(() => setArmed(null), 4000);
+  };
+  const remove = async (root: string) => {
+    disarm();
+    setError(null);
+    try {
+      const { projects } = await api.removeProject(root);
+      setProjects(projects);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const refresh = async () => {
     try {
@@ -515,13 +686,19 @@ function Sidebar() {
         )}
         {projects.map((p) => {
           const active = p.root === activeRoot;
+          const isArmed = armed === p.root;
           return (
             <button
               key={p.root}
               type="button"
               onClick={() => void switchTo(p.root)}
-              className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
-                active
+              onMouseLeave={() => {
+                if (armed === p.root) disarm();
+              }}
+              className={`group flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                isArmed
+                  ? "border-red-300 bg-red-50"
+                  : active
                   ? "border-orange-300 bg-orange-50 shadow-sm"
                   : "border-slate-200 bg-slate-50 hover:bg-slate-100"
               }`}
@@ -529,7 +706,7 @@ function Sidebar() {
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-orange-100 text-sm">
                 🛠
               </span>
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className={`block truncate text-sm font-semibold ${active ? "text-slate-900" : "text-slate-700"}`}>
                   {p.name}
                 </span>
@@ -537,12 +714,30 @@ function Sidebar() {
                   {p.root}
                 </span>
               </span>
+              {/* The current project cannot be removed (it would orphan the live
+                  server). x arms; a second click within 4s removes it. */}
+              {!active && (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isArmed) void remove(p.root);
+                    else arm(p.root);
+                  }}
+                  className={isArmed
+                    ? "shrink-0 text-xs font-semibold text-red-600"
+                    : "shrink-0 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"}
+                >
+                  {isArmed ? "remove?" : "×"}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      {/* Add a project by absolute path; the server validates it exists. */}
+      {/* Add a project by absolute path, or browse for one; the server validates it. */}
       <div className="border-t border-slate-200 px-3 py-3">
         {error && <div className="mb-2 text-xs text-red-600">{error}</div>}
         <div className="flex gap-1.5">
@@ -560,6 +755,14 @@ function Sidebar() {
           />
           <button
             type="button"
+            onClick={() => setPickerOpen(true)}
+            title="Browse folders"
+            className="rounded-xl border border-slate-200 bg-white px-2.5 text-xs text-slate-600 transition hover:bg-slate-100"
+          >
+            📁
+          </button>
+          <button
+            type="button"
             onClick={() => void add()}
             disabled={busy}
             className="rounded-xl bg-orange-600 px-3 text-xs font-semibold text-white transition hover:bg-orange-700 disabled:opacity-50"
@@ -568,7 +771,215 @@ function Sidebar() {
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {pickerOpen && (
+          <FolderPicker
+            initialPath={pathInput.trim().startsWith("/") ? pathInput.trim() : ""}
+            onAdded={(list) => {
+              setProjects(list);
+              setPathInput("");
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </aside>
+  );
+}
+
+// Server-backed folder picker (a browser file input cannot give an absolute
+// path). Lists directories from the localhost filesystem via /api/fs/dirs, lets
+// the user navigate in/out, and adds the CURRENT directory as a project.
+function FolderPicker(
+  { initialPath, onAdded, onClose }: {
+    initialPath: string;
+    onAdded: (projects: ProjectEntry[]) => void;
+    onClose: () => void;
+  },
+) {
+  const [dir, setDir] = useState(initialPath);
+  const [parent, setParent] = useState<string | null>(null);
+  const [dirs, setDirs] = useState<DirEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // New-folder inline input: null = hidden, string = the name being typed.
+  const [newName, setNewName] = useState<string | null>(null);
+
+  const load = async (target?: string) => {
+    setError(null);
+    try {
+      const res = await api.listDirs(target);
+      setDir(res.path);
+      setParent(res.parent);
+      setDirs(res.dirs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Start at the initial path (or HOME when blank, resolved server-side).
+  useEffect(() => {
+    void load(initialPath || undefined);
+  }, []);
+
+  // Escape closes, matching the settings modal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const use = async () => {
+    if (!dir || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { projects } = await api.addProject(dir);
+      onAdded(projects);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Create a new folder in the current dir, then navigate into it so "Use this
+  // folder" immediately adds it.
+  const createFolder = async () => {
+    const name = (newName ?? "").trim();
+    if (!name || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { path } = await api.makeDir(dir, name);
+      setNewName(null);
+      await load(path);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/20 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.94, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96 }}
+        transition={spring}
+        className="glass flex max-h-[80vh] w-[460px] flex-col rounded-3xl p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-base font-semibold">Choose a folder</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-500 transition-colors hover:text-slate-800"
+          >
+            ✕
+          </button>
+        </div>
+        {/* Current path: truncate on the left so the folder name (tail) stays readable. */}
+        <div
+          dir="rtl"
+          title={dir}
+          className="mb-2 truncate rounded-xl bg-slate-100 px-2.5 py-1.5 text-left text-xs text-slate-600"
+        >
+          {dir || "..."}
+        </div>
+        {error && <div className="mb-2 text-xs text-red-600">{error}</div>}
+
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {parent && (
+            <button
+              type="button"
+              onClick={() => void load(parent)}
+              className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100"
+            >
+              <span className="text-slate-400">↑</span> ..
+            </button>
+          )}
+          {dirs.map((entry) => (
+            <button
+              key={entry.path}
+              type="button"
+              onClick={() => void load(entry.path)}
+              className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            >
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              {entry.hasGit && (
+                <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                  git
+                </span>
+              )}
+            </button>
+          ))}
+          {dirs.length === 0 && !error && (
+            <div className="px-2 py-2 text-xs text-slate-400">No sub-folders here.</div>
+          )}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 border-t border-slate-200 pt-3">
+          {newName === null
+            ? (
+              <button
+                type="button"
+                onClick={() => setNewName("")}
+                className="mr-auto rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-100"
+              >
+                New folder
+              </button>
+            )
+            : (
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void createFolder();
+                  } else if (e.key === "Escape") {
+                    // Cancel the input without letting Escape close the picker.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setNewName(null);
+                  }
+                }}
+                placeholder="new folder name"
+                className="mr-auto min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-300"
+              />
+            )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void use()}
+            disabled={busy || !dir}
+            className="rounded-xl bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orange-700 disabled:opacity-50"
+          >
+            {busy ? "Adding..." : "Use this folder"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -580,6 +991,18 @@ function GoalStrip() {
   const activeGoalId = useStore((s) => s.activeGoalId);
   const setActiveGoal = useStore((s) => s.setActiveGoal);
   const loopActiveAt = useStore((s) => s.loopActiveAt);
+  // Which chip is armed for removal, plus the auto-disarm timer.
+  const [armed, setArmed] = useState<string | null>(null);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disarm = () => {
+    if (armTimer.current) clearTimeout(armTimer.current);
+    setArmed(null);
+  };
+  const arm = (goalId: string) => {
+    if (armTimer.current) clearTimeout(armTimer.current);
+    setArmed(goalId);
+    armTimer.current = setTimeout(() => setArmed(null), 4000);
+  };
   const open = (board?.goals ?? []).filter((g) => g.status === "open");
   const tasks = board?.tasks ?? [];
   if (open.length === 0) return null;
@@ -590,14 +1013,20 @@ function GoalStrip() {
         const live = now - (loopActiveAt[g.id] ?? 0) < 90_000;
         const blocked = tasks.some((t) => t.goalId === g.id && t.status === "blocked");
         const active = g.id === activeGoalId;
+        const isArmed = armed === g.id;
         const words = g.text.split(/\s+/).slice(0, 5).join(" ");
         return (
           <button
             key={g.id}
             type="button"
             onClick={() => setActiveGoal(g.id)}
-            className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
-              active
+            onMouseLeave={() => {
+              if (armed === g.id) disarm();
+            }}
+            className={`group flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
+              isArmed
+                ? "border-red-300 bg-red-50"
+                : active
                 ? "border-orange-300 bg-orange-50 shadow-sm"
                 : "border-slate-200 bg-white hover:border-slate-300"
             }`}
@@ -609,6 +1038,26 @@ function GoalStrip() {
             />
             <span className="font-medium text-slate-700">{g.id}</span>
             <span className="max-w-[22ch] truncate text-slate-500">{words}</span>
+            {/* x arms; a second click within 4s removes. stopPropagation so the
+                chip's select-on-click never fires from the x. */}
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isArmed) {
+                  disarm();
+                  void api.deleteGoal(g.id);
+                } else {
+                  arm(g.id);
+                }
+              }}
+              className={isArmed
+                ? "shrink-0 font-semibold text-red-600"
+                : "shrink-0 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"}
+            >
+              {isArmed ? "remove?" : "×"}
+            </span>
           </button>
         );
       })}

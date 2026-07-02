@@ -48,6 +48,14 @@ export interface ProjectEntry {
   current: boolean;
 }
 
+// One child directory the server-backed folder picker lists: its name, absolute
+// path, and whether a .git lives directly inside (a repo the user likely wants).
+export interface DirEntry {
+  name: string;
+  path: string;
+  hasGit: boolean;
+}
+
 export interface Task {
   id: string;
   goalId: string;
@@ -131,6 +139,11 @@ export interface Runtime {
   scout?: { enabled: boolean; backend: string };
   pushBranches?: boolean;
   maxParallelAgents?: number;
+  // Per-project codex power (from readConfig) and the machine-wide Claude model,
+  // so the settings modal can seed its "Model power" controls.
+  config?: { model: string; reasoningEffort: string; fastMode: boolean };
+  claudeModel?: string;
+  claudeThinking?: string;
   activeAgentStatuses?: AgentStatus[];
   externalAgents?: ExternalAgentStatus[];
 }

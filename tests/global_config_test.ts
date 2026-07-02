@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
   defaultGlobalConfig,
+  globalConfigPath,
   readGlobalConfig,
   updateGlobalConfig,
 } from "../src/board/global_config.ts";
@@ -38,6 +39,31 @@ Deno.test("updateGlobalConfig clamps the parallel-agent cap to 1-12 and persists
     assertEquals(updateGlobalConfig({ maxParallelAgents: 999 }).maxParallelAgents, 12);
     // Other fields are untouched by the cap update.
     assertEquals(readGlobalConfig().backend, defaultGlobalConfig().backend);
+  });
+});
+
+Deno.test("claude thinking defaults to high, round-trips, and normalizes invalid values", () => {
+  withTempHome(() => {
+    assertEquals(defaultGlobalConfig().claude.thinking, "high");
+    assertEquals(readGlobalConfig().claude.thinking, "high");
+
+    // A valid patch round-trips through persistence.
+    assertEquals(updateGlobalConfig({ claude: { thinking: "xhigh" } }).claude.thinking, "xhigh");
+    assertEquals(readGlobalConfig().claude.thinking, "xhigh");
+
+    // An invalid patched value normalizes back to the default instead of persisting.
+    assertEquals(updateGlobalConfig({ claude: { thinking: "turbo" } }).claude.thinking, "high");
+    assertEquals(readGlobalConfig().claude.thinking, "high");
+    // A thinking-only patch leaves the model untouched.
+    assertEquals(readGlobalConfig().claude.model, defaultGlobalConfig().claude.model);
+
+    // A malformed value on disk also normalizes to the default on read.
+    Deno.writeTextFileSync(
+      globalConfigPath(),
+      JSON.stringify({ claude: { model: "claude-x", thinking: "bogus" } }),
+    );
+    assertEquals(readGlobalConfig().claude.thinking, "high");
+    assertEquals(readGlobalConfig().claude.model, "claude-x");
   });
 });
 

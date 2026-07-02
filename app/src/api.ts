@@ -5,6 +5,7 @@
 import type {
   ActivityEvent,
   BoardSnapshot,
+  DirEntry,
   LifecycleEvent,
   ProjectEntry,
   Runtime,
@@ -66,6 +67,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ root }),
     }),
+  // Server-backed folder picker: browsers cannot hand back an absolute path, so
+  // the add-project picker lists directories from the server (localhost tool).
+  // Hits the primary origin like the rest of the project-registry flow.
+  listDirs: (path?: string) =>
+    primaryFetch<{ path: string; parent: string | null; dirs: DirEntry[] }>(
+      `/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+    ),
   lifecycle: (goalId?: string) =>
     jsonFetch<{ events: LifecycleEvent[] }>(
       `/api/lifecycle${goalId ? `?goalId=${encodeURIComponent(goalId)}` : ""}`,
@@ -121,6 +129,38 @@ export const api = {
     jsonFetch<{ maxParallelAgents: number }>("/api/maxagents", {
       method: "PATCH",
       body: JSON.stringify({ value }),
+    }),
+  // Per-project codex power knobs: model, reasoning effort, fast mode. The
+  // runtime line picks the new values up on the modal's refresh.
+  setConfig: (patch: { model?: string; reasoningEffort?: string; fastMode?: boolean }) =>
+    jsonFetch<{ model: string; reasoningEffort: string; fastMode: boolean }>("/api/config", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  // Machine-wide Claude model, patched through the same backends endpoint.
+  setClaudeModel: (model: string) =>
+    jsonFetch<{ claudeModel: string }>("/api/backend", {
+      method: "PATCH",
+      body: JSON.stringify({ claudeModel: model }),
+    }),
+  // Machine-wide Claude thinking level (pi --thinking), same backends endpoint.
+  setClaudeThinking: (thinking: string) =>
+    jsonFetch<{ claudeThinking: string }>("/api/backend", {
+      method: "PATCH",
+      body: JSON.stringify({ claudeThinking: thinking }),
+    }),
+  // Create a new folder inside `path` (the picker's current dir); returns the
+  // created absolute path so the picker can navigate straight into it.
+  makeDir: (path: string, name: string) =>
+    primaryFetch<{ path: string }>("/api/fs/mkdir", {
+      method: "POST",
+      body: JSON.stringify({ path, name }),
+    }),
+  // Remove a project from the registry (registry-only; never touches disk).
+  removeProject: (root: string) =>
+    primaryFetch<{ projects: ProjectEntry[] }>("/api/projects", {
+      method: "DELETE",
+      body: JSON.stringify({ root }),
     }),
 };
 

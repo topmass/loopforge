@@ -17,6 +17,7 @@ export interface PiRpcClientOptions {
   command?: string[];
   provider?: string;
   model?: string;
+  thinking?: string;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -34,6 +35,23 @@ interface TurnWaiter {
 export function piBinaryCommand(): string[] {
   const override = Deno.env.get("LOOPFORGE_PI_BIN");
   return override?.trim() ? [override.trim()] : ["pi"];
+}
+
+// Build the argument list (everything after the binary) pi is spawned with, so
+// arg construction is a pure function the tests can assert without spawning.
+export function piRpcArgs(options: PiRpcClientOptions): string[] {
+  const base = options.command ?? [...piBinaryCommand(), "--mode", "rpc"];
+  const args = [...base.slice(1)];
+  if (options.provider) {
+    args.push("--provider", options.provider);
+  }
+  if (options.model) {
+    args.push("--model", options.model);
+  }
+  if (options.thinking) {
+    args.push("--thinking", options.thinking);
+  }
+  return args;
 }
 
 export class PiRpcClient implements CodexClient {
@@ -197,15 +215,8 @@ export class PiRpcClient implements CodexClient {
       return;
     }
     const base = this.options.command ?? [...piBinaryCommand(), "--mode", "rpc"];
-    const args = [...base.slice(1)];
-    if (this.options.provider) {
-      args.push("--provider", this.options.provider);
-    }
-    if (this.options.model) {
-      args.push("--model", this.options.model);
-    }
     const command = new Deno.Command(base[0], {
-      args,
+      args: piRpcArgs(this.options),
       cwd,
       stdin: "piped",
       stdout: "piped",

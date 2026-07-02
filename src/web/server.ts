@@ -9,12 +9,13 @@ import {
 import { ActivityEvent, ActivityEventInput, TaskStatus } from "../board/types.ts";
 import { normalizeRoot, staticPath } from "../paths.ts";
 import {
+  CLAUDE_THINKING_LEVELS,
   describeBackend,
   normalizeBackend,
   readGlobalConfig,
   updateGlobalConfig,
 } from "../board/global_config.ts";
-import { listProjects, registerProject } from "../board/projects.ts";
+import { listProjects, registerProject, removeProject } from "../board/projects.ts";
 import { CodexClient } from "../workers/codex_app_server.ts";
 import { gitMergeBranch } from "../workers/git_utils.ts";
 import { GoalPlanner } from "../workers/goal_planner.ts";
@@ -286,6 +287,22 @@ export function startServer(
           return json({ projects: projectList(normalizedRoot) });
         }
 
+        // Remove a project from the sidebar registry. Registry-only: this never
+        // deletes the folder on disk. The project this server is viewing cannot
+        // be removed - it would orphan the live instance.
+        if (url.pathname === "/api/projects" && request.method === "DELETE") {
+          const body = await readJson<{ root?: string }>(request);
+          const target = body.root?.trim() ?? "";
+          if (!target) {
+            return json({ error: "root is required." }, 400);
+          }
+          if (normalizeRoot(target) === normalizedRoot) {
+            return json({ error: "Cannot remove the project this server is viewing." }, 400);
+          }
+          removeProject(target);
+          return json({ projects: projectList(normalizedRoot) });
+        }
+
         // Hand back the URL of the project's own server, spawning one on a free
         // port (with the same options this instance received, so injected fake
         // codex clients reach child servers in tests) if it is not live yet.
@@ -307,6 +324,71 @@ export function startServer(
           const child = startServer(target, findFreePort(), options);
           spawnedChildren.set(target, child);
           return json({ url: child.url });
+        }
+
+        // Server-backed folder picker for adding a project: a browser file input
+        // cannot expose an absolute path, so the GUI browses the localhost
+        // filesystem through this read-only endpoint. Defaults to $HOME.
+        if (url.pathname === "/api/fs/dirs" && request.method === "GET") {
+          const raw = url.searchParams.get("path")?.trim();
+          const candidate = raw && raw.length
+            ? raw
+            : (Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "/");
+          if (!path.isAbsolute(candidate)) {
+            return json({ error: `${candidate} is not an absolute path.` }, 400);
+          }
+          const target = path.normalize(candidate);
+          let entries: Deno.DirEntry[];
+          try {
+            entries = [...Deno.readDirSync(target)];
+          } catch {
+            return json({ error: `${target} is not a directory.` }, 400);
+          }
+          // Directories only, dot-dirs skipped, sorted by name, capped so a huge
+          // folder cannot balloon the response; stat .git only on the survivors.
+          const dirs = entries
+            .filter((entry) => entry.isDirectory && !entry.name.startsWith("."))
+            .map((entry) => entry.name)
+            .sort()
+            .slice(0, 200)
+            .map((name) => {
+              const full = path.join(target, name);
+              let hasGit = false;
+              try {
+                Deno.statSync(path.join(full, ".git"));
+                hasGit = true;
+              } catch {
+                // Best-effort: no .git (or unreadable) reads as a non-repo dir.
+              }
+              return { name, path: full, hasGit };
+            });
+          const parent = path.dirname(target);
+          return json({ path: target, parent: parent === target ? null : parent, dirs });
+        }
+
+        // Create a brand-new project folder from the picker. Non-recursive under
+        // an existing absolute parent; the name must be a single path segment.
+        if (url.pathname === "/api/fs/mkdir" && request.method === "POST") {
+          const body = await readJson<{ path?: string; name?: string }>(request);
+          const parent = body.path?.trim() ?? "";
+          const name = body.name?.trim() ?? "";
+          if (!path.isAbsolute(parent) || !dirExists(parent)) {
+            return json({ error: `${parent || "(empty)"} is not an existing directory.` }, 400);
+          }
+          if (
+            !name || name === "." || name === ".." || name.includes("/") || name.includes("\\")
+          ) {
+            return json({ error: `${name || "(empty)"} is not a valid folder name.` }, 400);
+          }
+          const created = path.join(parent, name);
+          try {
+            // Non-recursive: throws if the target already exists, which we surface
+            // as a 400 rather than silently reusing an existing directory.
+            Deno.mkdirSync(created);
+          } catch {
+            return json({ error: `${created} already exists or could not be created.` }, 400);
+          }
+          return json({ path: created });
         }
 
         if (url.pathname === "/api/events") {
@@ -382,6 +464,8 @@ export function startServer(
             config: readConfig(normalizedRoot),
             backend: describeBackend(readGlobalConfig()),
             backendRaw: readGlobalConfig().backend,
+            claudeModel: readGlobalConfig().claude.model,
+            claudeThinking: readGlobalConfig().claude.thinking,
             rescue: readGlobalConfig().rescue,
             planner: readGlobalConfig().planner,
             scout: readGlobalConfig().scout,
@@ -523,14 +607,42 @@ export function startServer(
         }
 
         // Change the main agent backend (the model the loop owner + workers run
-        // on): codex / claude / local / pi.
+        // on): codex / claude / local / pi. Also carries the machine-wide Claude
+        // model choice (global config claude.model), since that is the same
+        // backends surface the settings modal edits.
         if (url.pathname === "/api/backend" && request.method === "PATCH") {
-          const body = await readJson<{ backend?: string }>(request);
-          if (typeof body.backend !== "string" || !body.backend.trim()) {
-            return json({ error: "backend is required." }, 400);
+          const body = await readJson<
+            { backend?: string; claudeModel?: string; claudeThinking?: string }
+          >(request);
+          const hasBackend = typeof body.backend === "string" && body.backend.trim().length > 0;
+          const hasClaudeModel = typeof body.claudeModel === "string" &&
+            body.claudeModel.trim().length > 0;
+          const hasClaudeThinking = typeof body.claudeThinking === "string" &&
+            body.claudeThinking.trim().length > 0;
+          if (!hasBackend && !hasClaudeModel && !hasClaudeThinking) {
+            return json({ error: "backend, claudeModel, or claudeThinking is required." }, 400);
+          }
+          if (
+            hasClaudeThinking &&
+            !CLAUDE_THINKING_LEVELS.includes(
+              body.claudeThinking!.trim() as typeof CLAUDE_THINKING_LEVELS[number],
+            )
+          ) {
+            return json(
+              { error: `claudeThinking must be one of: ${CLAUDE_THINKING_LEVELS.join(", ")}.` },
+              400,
+            );
           }
           const updated = updateGlobalConfig({
-            backend: normalizeBackend(body.backend.trim(), "codex"),
+            ...(hasBackend ? { backend: normalizeBackend(body.backend!.trim(), "codex") } : {}),
+            ...(hasClaudeModel || hasClaudeThinking
+              ? {
+                claude: {
+                  ...(hasClaudeModel ? { model: body.claudeModel!.trim() } : {}),
+                  ...(hasClaudeThinking ? { thinking: body.claudeThinking!.trim() } : {}),
+                },
+              }
+              : {}),
           });
           broadcastActivity(
             store.appendEvent(
@@ -538,10 +650,19 @@ export function startServer(
               null,
               "system",
               "config",
-              `Main backend set to ${updated.backend}.`,
+              hasBackend
+                ? `Main backend set to ${updated.backend}.`
+                : hasClaudeModel
+                ? `Claude model set to ${updated.claude.model}.`
+                : `Claude thinking set to ${updated.claude.thinking}.`,
             ),
           );
-          return json({ backend: describeBackend(updated), raw: updated.backend });
+          return json({
+            backend: describeBackend(updated),
+            raw: updated.backend,
+            claudeModel: updated.claude.model,
+            claudeThinking: updated.claude.thinking,
+          });
         }
 
         if (url.pathname === "/api/rescue" && request.method === "PATCH") {
