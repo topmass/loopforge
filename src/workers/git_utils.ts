@@ -251,9 +251,15 @@ export async function ensureWorktreeExcludes(cwd: string): Promise<void> {
   // LOOP_PLAN.md is per-goal working memory that lives on disk in the goal's
   // worktree; committing it made each goal's finished plan merge into main and
   // seed the NEXT goal's board with stale done items.
-  const additions = [".omx/", ".loopforge/", "LOOP_PLAN.md"].filter((entry) =>
-    !current.split(/\r?\n/).includes(entry)
-  );
+  // .loopforge-goal.json and lf-task are the per-worktree task-CLI shim files
+  // (see task_workspace.ts); they must never be committed into a task branch.
+  const additions = [
+    ".omx/",
+    ".loopforge/",
+    "LOOP_PLAN.md",
+    ".loopforge-goal.json",
+    "lf-task",
+  ].filter((entry) => !current.split(/\r?\n/).includes(entry));
   if (!additions.length) {
     return;
   }

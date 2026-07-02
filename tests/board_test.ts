@@ -639,6 +639,56 @@ Deno.test("tasks store thread lineage, compact cards, handoffs, and conflict sig
   }
 });
 
+Deno.test("loop plan items track status and emit plan.updated on every mutation", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Track loop plan work");
+
+    const item = store.addLoopPlanItem(goal.id, "Wire the store", "one line spec");
+    assertEquals(item.kind, "loop");
+    assertEquals(item.status, "ready");
+    let items = store.listLoopPlanItems(goal.id);
+    assertEquals(items.length, 1);
+    assertEquals(items[0].status, "todo");
+    assertEquals(items[0].note, "one line spec");
+
+    store.setLoopPlanItemStatus(goal.id, item.id, "doing");
+    assertEquals(store.listLoopPlanItems(goal.id)[0].status, "doing");
+
+    store.appendLoopPlanNote(goal.id, item.id, "made progress");
+    assertStringIncludes(store.listLoopPlanItems(goal.id)[0].note, "made progress");
+
+    // Done is the evidence gate.
+    assertThrows(
+      () => store.setLoopPlanItemStatus(goal.id, item.id, "done"),
+      Error,
+      "Evidence is required",
+    );
+
+    store.setLoopPlanItemStatus(goal.id, item.id, "done", "all checks pass");
+    const done = store.listLoopPlanItems(goal.id)[0];
+    assertEquals(done.status, "done");
+    assertEquals(done.note, "all checks pass");
+
+    // One plan.updated per successful mutation (add, start, note, done = 4).
+    const planEvents = store.listLifecycleEvents(goal.id).filter((event) =>
+      event.kind === "plan.updated"
+    );
+    assertEquals(planEvents.length, 4);
+    const finalSteps = planEvents.at(-1)?.data.steps as Array<
+      { title: string; status: string; note: string }
+    >;
+    assertEquals(finalSteps.length, 1);
+    assertEquals(finalSteps[0].status, "done");
+    assertEquals(finalSteps[0].note, "all checks pass");
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("task and goal ids never collide after deletions", () => {
   const root = Deno.makeTempDirSync();
   const store = new BoardStore(root);

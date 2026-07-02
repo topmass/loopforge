@@ -18,6 +18,8 @@ import {
   LifecycleEvent,
   lifecycleToActivity,
   parseLifecycleEvent,
+  PlanStep,
+  planUpdated,
 } from "./lifecycle.ts";
 import { ensureAgentContext, ensureWorkflow } from "../workflow/workflow.ts";
 import { summarizeGoalProgress } from "./goal_progress.ts";
@@ -908,50 +910,10 @@ export class BoardStore {
     const byTitle = new Map(existing.map((task) => [normalizeTitle(task.title), task]));
     const now = timestamp();
     for (const item of items) {
-      const status = item.status === "done"
-        ? "done"
-        : item.status === "doing"
-        ? "in_progress"
-        : "ready";
+      const status = loopPlanTaskStatus(item.status);
       const current = byTitle.get(normalizeTitle(item.title));
       if (!current) {
-        const taskId = this.nextHumanId("TASK", "tasks");
-        this.db.prepare(`
-          INSERT INTO tasks (
-            id, goal_id, title, description, status, kind, ops_action, priority, branch_name, worktree_path,
-            thread_id, dependency_ids_json, risk_level, verification_plan, loop_phase, loop_attempt,
-            current_gate, verification_summary, next_action, needs_input_prompt, supervisor_decision, workpad,
-            acceptance_criteria, validation, blocked_reason, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          taskId,
-          goalId,
-          normalizeTitle(item.title),
-          item.note,
-          status,
-          "loop",
-          null,
-          100,
-          null,
-          null,
-          null,
-          "[]",
-          "low",
-          "",
-          status === "done" ? "done" : status === "in_progress" ? "working" : "queued",
-          0,
-          "loop-plan",
-          "",
-          "Worked by the goal loop; mirrored from LOOP_PLAN.md.",
-          null,
-          "",
-          "Mirrored from LOOP_PLAN.md.",
-          "",
-          "",
-          null,
-          now,
-          now,
-        );
+        const taskId = this.insertLoopPlanTaskRow(goalId, item.title, item.note, item.status);
         events.push(
           this.appendEvent(taskId, null, "loop", "plan", `${goalId} plan item: ${item.title}`),
         );
@@ -963,7 +925,7 @@ export class BoardStore {
         ).run(
           status,
           item.note,
-          status === "done" ? "done" : status === "in_progress" ? "working" : "queued",
+          loopPlanTaskPhase(status),
           now,
           current.id,
         );
@@ -981,6 +943,154 @@ export class BoardStore {
       }
     }
     return events;
+  }
+
+  // First-class loop-plan API for the `loopforge task` CLI. Items are the SAME
+  // kind="loop" tasks syncLoopPlanTasks mirrors, so the TUI and existing queries
+  // keep working; every mutation re-emits the whole plan as one plan.updated
+  // lifecycle event so the GUI/TUI update live with no per-mutation logic.
+  addLoopPlanItem(goalId: string, title: string, spec = ""): Task {
+    this.getOpenGoal(goalId);
+    const trimmed = title.trim();
+    if (!trimmed) {
+      throw new Error("Loop plan item title is required.");
+    }
+    const taskId = this.insertLoopPlanTaskRow(goalId, trimmed, spec.trim(), "todo");
+    this.emitLoopPlanUpdate(goalId, taskId, `Added loop plan item ${taskId}: ${trimmed}`);
+    return this.getTask(taskId);
+  }
+
+  setLoopPlanItemStatus(
+    goalId: string,
+    taskId: string,
+    status: "todo" | "doing" | "done",
+    evidence?: string,
+  ): Task {
+    const task = this.getLoopPlanTask(goalId, taskId);
+    // Done is the evidence gate: a step cannot be marked complete without proof,
+    // which is what the plan and closure gates read back as the item's note.
+    if (status === "done" && !evidence?.trim()) {
+      throw new Error(`Evidence is required to mark ${taskId} done.`);
+    }
+    const taskStatus = loopPlanTaskStatus(status);
+    const note = status === "done" ? evidence!.trim() : task.description;
+    this.db.prepare(
+      "UPDATE tasks SET status = ?, description = ?, loop_phase = ?, updated_at = ? WHERE id = ?",
+    ).run(taskStatus, note, loopPlanTaskPhase(taskStatus), timestamp(), taskId);
+    this.emitLoopPlanUpdate(goalId, taskId, `${taskId} -> ${status}`);
+    return this.getTask(taskId);
+  }
+
+  appendLoopPlanNote(goalId: string, taskId: string, text: string): Task {
+    const task = this.getLoopPlanTask(goalId, taskId);
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error("Note text is required.");
+    }
+    const note = task.description ? `${task.description}\n${trimmed}` : trimmed;
+    this.db.prepare("UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?").run(
+      note,
+      timestamp(),
+      taskId,
+    );
+    this.emitLoopPlanUpdate(goalId, taskId, `Noted ${taskId}: ${trimmed}`);
+    return this.getTask(taskId);
+  }
+
+  listLoopPlanItems(
+    goalId: string,
+  ): Array<{ id: string; title: string; status: "todo" | "doing" | "done"; note: string }> {
+    this.getGoal(goalId);
+    // rowid ASC is exact insertion (creation) order without depending on the
+    // millisecond resolution of created_at when items are added in a burst.
+    return (this.db.prepare(
+      "SELECT * FROM tasks WHERE goal_id = ? AND kind = 'loop' ORDER BY rowid ASC",
+    ).all(goalId) as SqlRow[]).map(taskFromRow).map((task) => ({
+      id: task.id,
+      title: task.title,
+      status: loopPlanStatusFromTask(task.status),
+      note: task.description,
+    }));
+  }
+
+  // Insert one kind="loop" task row. Shared by the file-plan mirror
+  // (syncLoopPlanTasks) and the task CLI so both keep an identical task shape.
+  private insertLoopPlanTaskRow(
+    goalId: string,
+    title: string,
+    note: string,
+    status: "todo" | "doing" | "done",
+  ): string {
+    const taskStatus = loopPlanTaskStatus(status);
+    const taskId = this.nextHumanId("TASK", "tasks");
+    const now = timestamp();
+    this.db.prepare(`
+      INSERT INTO tasks (
+        id, goal_id, title, description, status, kind, ops_action, priority, branch_name, worktree_path,
+        thread_id, dependency_ids_json, risk_level, verification_plan, loop_phase, loop_attempt,
+        current_gate, verification_summary, next_action, needs_input_prompt, supervisor_decision, workpad,
+        acceptance_criteria, validation, blocked_reason, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      taskId,
+      goalId,
+      normalizeTitle(title),
+      note,
+      taskStatus,
+      "loop",
+      null,
+      100,
+      null,
+      null,
+      null,
+      "[]",
+      "low",
+      "",
+      loopPlanTaskPhase(taskStatus),
+      0,
+      "loop-plan",
+      "",
+      "Worked by the goal loop; mirrored from LOOP_PLAN.md.",
+      null,
+      "",
+      "Mirrored from LOOP_PLAN.md.",
+      "",
+      "",
+      null,
+      now,
+      now,
+    );
+    return taskId;
+  }
+
+  private getOpenGoal(goalId: string): Goal {
+    const goal = this.getGoal(goalId);
+    if (goal.status === "closed") {
+      throw new Error(`${goalId} is closed.`);
+    }
+    return goal;
+  }
+
+  private getLoopPlanTask(goalId: string, taskId: string): Task {
+    this.getOpenGoal(goalId);
+    const task = this.getTask(taskId);
+    if (task.goalId !== goalId || task.kind !== "loop") {
+      throw new Error(`${taskId} is not a loop plan item of ${goalId}.`);
+    }
+    return task;
+  }
+
+  // After any loop-plan mutation: one plan.updated lifecycle event carrying the
+  // whole current step list (the shape the GUI/TUI already read), plus one
+  // compact activity line for the human log.
+  private emitLoopPlanUpdate(goalId: string, taskRef: string, summary: string): void {
+    const steps: PlanStep[] = this.listLoopPlanItems(goalId).map((item) => ({
+      title: item.title,
+      status: item.status,
+      note: item.note,
+    }));
+    this.appendLifecycleEvent(planUpdated(goalId, steps));
+    this.appendEvent(taskRef, null, "plan", "task", summary);
   }
 
   // The goal loop's attended hold: one ordinary code task carrying the goal
@@ -2225,6 +2335,20 @@ function loopPatchForTransition(
 
 function normalizeRiskLevel(value: unknown): TaskRiskLevel {
   return value === "low" || value === "high" ? value : "medium";
+}
+
+// Loop-plan item status <-> task status/phase, in one place so the file-plan
+// mirror and the task CLI map identically.
+function loopPlanTaskStatus(status: "todo" | "doing" | "done"): TaskStatus {
+  return status === "done" ? "done" : status === "doing" ? "in_progress" : "ready";
+}
+
+function loopPlanTaskPhase(taskStatus: TaskStatus): TaskLoopPhase {
+  return taskStatus === "done" ? "done" : taskStatus === "in_progress" ? "working" : "queued";
+}
+
+function loopPlanStatusFromTask(taskStatus: TaskStatus): "todo" | "doing" | "done" {
+  return taskStatus === "done" ? "done" : taskStatus === "in_progress" ? "doing" : "todo";
 }
 
 function normalizeLoopPhase(value: unknown): TaskLoopPhase {

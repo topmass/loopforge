@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import path from "node:path";
 import { BoardStore } from "../src/board/store.ts";
 import {
   gitCommitAll,
@@ -8,6 +9,7 @@ import {
   prepareTaskWorktree,
   removeTaskWorktree,
 } from "../src/workers/git_utils.ts";
+import { writeTaskWorkspace } from "../src/workers/task_workspace.ts";
 
 // Records the acquire/release sequence so tests can prove the lease brackets the
 // merge; acquireLease always grants so the happy/conflict paths reach the merge.
@@ -49,8 +51,42 @@ Deno.test("worktree commits exclude agent runtime folders", async () => {
     const commit = await gitCommitAll(assignment.worktreePath, "commit result");
     assertEquals(typeof commit, "string");
     assertEquals(await git(assignment.worktreePath, ["status", "--short"]), "");
+
+    // The task-CLI shim files (task_workspace.ts) must also be excluded so a
+    // worktree never commits them into its branch.
+    const commonDir = (await git(assignment.worktreePath, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ])).trim();
+    const excludes = await Deno.readTextFile(`${commonDir}/info/exclude`);
+    assertStringIncludes(excludes, ".loopforge-goal.json");
+    assertStringIncludes(excludes, "lf-task");
   } finally {
     await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("writeTaskWorkspace writes the goal pointer and an executable lf-task shim", async () => {
+  const root = Deno.makeTempDirSync();
+  const worktree = Deno.makeTempDirSync();
+  try {
+    await writeTaskWorkspace(root, "GOAL-1", worktree);
+
+    const pointer = JSON.parse(await Deno.readTextFile(`${worktree}/.loopforge-goal.json`));
+    assertEquals(pointer.goalId, "GOAL-1");
+    assertEquals(pointer.root, path.resolve(root));
+
+    const shim = await Deno.readTextFile(`${worktree}/lf-task`);
+    assertStringIncludes(shim, "#!/usr/bin/env bash");
+    assertStringIncludes(shim, "task --root");
+    assertStringIncludes(shim, '--goal "GOAL-1"');
+
+    const mode = (await Deno.stat(`${worktree}/lf-task`)).mode ?? 0;
+    assertEquals((mode & 0o111) !== 0, true);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+    await Deno.remove(worktree, { recursive: true });
   }
 });
 

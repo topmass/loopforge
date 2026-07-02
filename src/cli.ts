@@ -1,3 +1,4 @@
+import path from "node:path";
 import { BoardStore } from "./board/store.ts";
 import { TASK_STATUS_LABELS } from "./board/types.ts";
 import {
@@ -1232,6 +1233,16 @@ async function mainCommand(args: string[]): Promise<void> {
 }
 
 function taskCommand(args: string[]): void {
+  // The model-facing task tracker: `loopforge task <verb> ...` writes loop-plan
+  // items straight into the project board so the GUI updates live. The classic
+  // `task TASK-ID [card|threads]` inspector stays reachable because TASK-ids
+  // never collide with these lowercase verbs.
+  const parsed = parseTaskArgs(args);
+  const verb = parsed.positional[0];
+  if (verb && ["list", "add", "start", "done", "note"].includes(verb)) {
+    runTaskCli(verb, parsed);
+    return;
+  }
   const taskId = args[0];
   const action = args[1] ?? "card";
   if (!taskId) {
@@ -1252,6 +1263,149 @@ function taskCommand(args: string[]): void {
     }
     throw new Error(`Unknown task command: ${action}`);
   });
+}
+
+interface TaskCliArgs {
+  rootFlag: string | null;
+  goalFlag: string | null;
+  spec: string | null;
+  evidence: string | null;
+  positional: string[];
+}
+
+// Every task-CLI flag takes a value, so one pass separates flags from the verb
+// and its positional operands.
+function parseTaskArgs(args: string[]): TaskCliArgs {
+  const parsed: TaskCliArgs = {
+    rootFlag: null,
+    goalFlag: null,
+    spec: null,
+    evidence: null,
+    positional: [],
+  };
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--root") {
+      parsed.rootFlag = args[++index] ?? null;
+    } else if (arg === "--goal") {
+      parsed.goalFlag = args[++index] ?? null;
+    } else if (arg === "--spec") {
+      parsed.spec = args[++index] ?? null;
+    } else if (arg === "--evidence") {
+      parsed.evidence = args[++index] ?? null;
+    } else {
+      parsed.positional.push(arg);
+    }
+  }
+  return parsed;
+}
+
+function runTaskCli(verb: string, parsed: TaskCliArgs): void {
+  const target = resolveTaskTarget(parsed.rootFlag, parsed.goalFlag);
+  const store = new BoardStore(target.root);
+  try {
+    // getGoal rejects an unknown id; the explicit closed check refuses a goal
+    // that is no longer accepting work. Both are terse one-line failures.
+    if (store.getGoal(target.goalId).status === "closed") {
+      throw new Error(`${target.goalId} is closed.`);
+    }
+    if (verb === "list") {
+      const items = store.listLoopPlanItems(target.goalId);
+      if (!items.length) {
+        console.log("no tasks yet");
+        return;
+      }
+      for (const item of items) {
+        console.log(`${item.id}  ${item.status}  ${item.title}`);
+        const note = item.note.replace(/\s+/g, " ").trim();
+        if (note) {
+          console.log(`    note: ${note.slice(0, 200)}`);
+        }
+      }
+      return;
+    }
+    if (verb === "add") {
+      const title = parsed.positional.slice(1).join(" ").trim();
+      if (!title) {
+        throw new Error('add requires a title: task add "<title>" [--spec "<one line>"]');
+      }
+      const item = store.addLoopPlanItem(target.goalId, title, parsed.spec ?? "");
+      console.log(`added ${item.id}  ${item.title}`);
+      return;
+    }
+    const id = parsed.positional[1];
+    if (!id) {
+      throw new Error(`${verb} requires a task id: task ${verb} <id>`);
+    }
+    if (verb === "start") {
+      console.log(`started ${store.setLoopPlanItemStatus(target.goalId, id, "doing").id}`);
+      return;
+    }
+    if (verb === "done") {
+      if (!parsed.evidence?.trim()) {
+        throw new Error('done requires --evidence "<proof>"');
+      }
+      console.log(
+        `done ${store.setLoopPlanItemStatus(target.goalId, id, "done", parsed.evidence).id}`,
+      );
+      return;
+    }
+    if (verb === "note") {
+      const text = parsed.positional.slice(2).join(" ").trim();
+      if (!text) {
+        throw new Error('note requires text: task note <id> "<text>"');
+      }
+      console.log(`noted ${store.appendLoopPlanNote(target.goalId, id, text).id}`);
+      return;
+    }
+  } finally {
+    store.close();
+  }
+}
+
+// Resolve which project board and goal a task command targets: explicit flags
+// win, else the nearest .loopforge-goal.json walking up from cwd (the shim
+// worktree writes one at its root). Either half may come from either source.
+function resolveTaskTarget(
+  rootFlag: string | null,
+  goalFlag: string | null,
+): { root: string; goalId: string } {
+  let resolvedRoot = rootFlag;
+  let resolvedGoal = goalFlag;
+  if (!resolvedRoot || !resolvedGoal) {
+    const pointer = findGoalPointer(Deno.cwd());
+    if (pointer) {
+      resolvedRoot = resolvedRoot ?? pointer.root;
+      resolvedGoal = resolvedGoal ?? pointer.goalId;
+    }
+  }
+  if (!resolvedRoot || !resolvedGoal) {
+    throw new Error(
+      "No task target. Pass --root <path> --goal <id>, or run inside a worktree with a .loopforge-goal.json pointer.",
+    );
+  }
+  return { root: normalizeRoot(resolvedRoot), goalId: resolvedGoal };
+}
+
+function findGoalPointer(startDir: string): { root: string; goalId: string } | null {
+  let current = path.resolve(startDir);
+  while (true) {
+    try {
+      const parsed = JSON.parse(
+        Deno.readTextFileSync(path.join(current, ".loopforge-goal.json")),
+      );
+      if (typeof parsed?.root === "string" && typeof parsed?.goalId === "string") {
+        return { root: parsed.root, goalId: parsed.goalId };
+      }
+    } catch {
+      // No readable pointer here; keep walking toward the filesystem root.
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
 }
 
 async function steerCommand(args: string[]): Promise<void> {
@@ -1484,6 +1638,7 @@ Usage:
   loopforge merge TASK-ID
   loopforge main status|ensure|reset|absorb
   loopforge task TASK-ID [card|threads]
+  loopforge task list|add|start|done|note ...   # goal loop tracker (also ./lf-task in a worktree)
   loopforge steer TASK-ID "<message>"
   loopforge compact TASK-ID
   loopforge close-goal [GOAL-ID]
