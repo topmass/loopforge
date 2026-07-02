@@ -223,10 +223,13 @@ export function BoardView() {
                 whileHover={{ y: -2 }}
                 type="button"
                 onClick={() => selectTask(step.title)}
-                className="rounded-2xl border border-l-2 border-line-strong border-l-accent bg-surface-raised p-3 text-left shadow-sm"
+                className="rounded-2xl border border-line-strong bg-surface-raised p-3 text-left shadow-sm"
               >
                 {showGoalChip && <GoalChip id={goalId} />}
-                <div className="text-sm font-medium text-ink">{step.title}</div>
+                <div className="flex items-center gap-2">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS.live.dot}`} />
+                  <div className="text-sm font-medium text-ink">{step.title}</div>
+                </div>
                 {step.note && (
                   <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-ink-muted">
                     {step.note}
