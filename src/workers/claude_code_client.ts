@@ -63,6 +63,9 @@ export class ClaudeCodeClient implements CodexClient {
   }
 
   async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    if (this.child) {
+      throw new Error("Claude Code client already has a turn running.");
+    }
     const args = [
       "-p",
       input.prompt,

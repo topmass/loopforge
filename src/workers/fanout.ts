@@ -410,7 +410,7 @@ export function summarizeFanout(result: FanoutResult): string {
     }
   }
   lines.push(
-    "Integrate these results, update LOOP_PLAN.md, and continue. Do not re-do merged work.",
+    "Integrate these results, update ./lf-task, and continue. Do not re-do merged work.",
   );
   return lines.join("\n");
 }

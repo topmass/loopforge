@@ -213,3 +213,20 @@ Deno.test("stop() kills an in-flight child without error", async () => {
   // Idempotent: a second stop() with nothing in flight is a no-op.
   await client.stop();
 });
+
+Deno.test("claude client rejects overlapping turns on the same client", async () => {
+  const spawn: ClaudeSpawn = () => new FakeClaude({ hold: true });
+  const { onEvent } = collector();
+  const client = new ClaudeCodeClient(onEvent, { model: "m", effort: "high" }, spawn);
+  const session = await client.startSession("/repo");
+  const pending = client.runTurn(session, { title: "t1", prompt: "x" }).catch(() => {});
+
+  await assertRejects(
+    () => client.runTurn(session, { title: "t2", prompt: "y" }),
+    Error,
+    "already has a turn running",
+  );
+
+  await client.stop();
+  await pending;
+});

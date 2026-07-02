@@ -60,11 +60,11 @@ export interface LoopForgeServerOptions {
 const APP_ROOT = path.normalize(decodeURIComponent(new URL("../../", import.meta.url).pathname));
 
 // Whether the pi coding agent binary (the "local" backend) is installed, probed
-// ONCE at startup and cached - /api/runtime reads this variable so it never
-// spawns a subprocess per request. Populated asynchronously; stays the
-// not-found default until the probe resolves.
-let piBinary: { found: boolean; version: string | null } = { found: false, version: null };
-(async () => {
+// once at startup and cached. /api/runtime awaits the same promise so the first
+// request cannot read the default before the probe resolves.
+type PiBinaryProbe = { found: boolean; version: string | null };
+const piBinaryPromise: Promise<PiBinaryProbe> = probePiBinary();
+async function probePiBinary(): Promise<PiBinaryProbe> {
   try {
     const command = piBinaryCommand();
     const output = await new Deno.Command(command[0], {
@@ -78,12 +78,13 @@ let piBinary: { found: boolean; version: string | null } = { found: false, versi
       // pi prints its version to stderr, not stdout - read both.
       const version = (new TextDecoder().decode(output.stdout).trim() ||
         new TextDecoder().decode(output.stderr).trim()).split("\n")[0];
-      piBinary = { found: true, version: version || null };
+      return { found: true, version: version || null };
     }
   } catch {
     // Missing binary, spawn failure, or timeout all read as "not installed".
   }
-})();
+  return { found: false, version: null };
+}
 
 // One Deno process can host several projects at once - each open project is its
 // own full startServer instance. This process-wide registry lets any instance
@@ -286,6 +287,7 @@ export function startServer(
   const server = Deno.serve(
     {
       port,
+      hostname: "127.0.0.1",
       signal: abort.signal,
       onListen: ({ hostname, port }) => {
         console.log(`LoopForge listening at http://${hostname}:${port}`);
@@ -294,11 +296,12 @@ export function startServer(
     async (request) => {
       const url = new URL(request.url);
 
+      const json = (payload: unknown, status = 200) => jsonResponse(payload, status, request);
+
       // Localhost-only command center: the GUI is served from the primary
-      // origin but fetches sibling project servers on other ports, so preflight
-      // is answered up front and every /api response is permissively CORS-open.
+      // origin but fetches sibling project servers on other local ports.
       if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: corsHeaders() });
+        return new Response(null, { status: 204, headers: corsHeaders(request) });
       }
 
       try {
@@ -442,7 +445,7 @@ export function startServer(
                 "content-type": "text/event-stream",
                 "cache-control": "no-cache",
                 connection: "keep-alive",
-                ...corsHeaders(),
+                ...corsHeaders(request),
               },
             },
           );
@@ -489,6 +492,7 @@ export function startServer(
 
         if (url.pathname === "/api/runtime" && request.method === "GET") {
           const board = store.getBoard();
+          const piBinary = await piBinaryPromise;
           return json({
             queueRunning,
             project: { name: path.basename(normalizedRoot) || "project", path: normalizedRoot },
@@ -1687,19 +1691,24 @@ async function readJson<T>(request: Request): Promise<T> {
   return await request.json() as T;
 }
 
-function json(payload: unknown, status = 200): Response {
+function jsonResponse(payload: unknown, status: number, request: Request): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders() },
+    headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders(request) },
   });
 }
 
-// Localhost-only tool: permissive CORS so the primary-origin GUI can fetch the
-// sibling project servers this process runs on other ports.
-function corsHeaders(): Record<string, string> {
+// Reflect only local browser origins so the primary GUI can fetch sibling
+// project servers without letting arbitrary websites drive this local tool.
+function corsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get("origin") ?? "";
+  if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+    return {};
+  }
   return {
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": origin,
     "access-control-allow-headers": "Content-Type",
     "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+    "vary": "Origin",
   };
 }

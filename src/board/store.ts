@@ -227,10 +227,9 @@ export class BoardStore {
     workpadFallback: string,
   ): Task[] {
     const now = timestamp();
-    const existingTaskCount = this.maxIdNumber("tasks");
-    const planned = drafts.map((draft, index) => ({
+    const planned = drafts.map((draft) => ({
       draft,
-      taskId: `TASK-${existingTaskCount + index + 1}`,
+      taskId: this.nextHumanId("TASK", "tasks"),
     }));
     const titleToId = new Map(
       planned.map(({ draft, taskId }) => [normalizeTitle(draft.title), taskId]),
@@ -287,10 +286,9 @@ export class BoardStore {
     }
     const taskDrafts = drafts.length ? drafts : [defaultTaskDraft(goal.text)];
     const now = timestamp();
-    const existingTaskCount = this.maxIdNumber("tasks");
-    const planned = taskDrafts.map((draft, index) => ({
+    const planned = taskDrafts.map((draft) => ({
       draft,
-      taskId: `TASK-${existingTaskCount + index + 1}`,
+      taskId: this.nextHumanId("TASK", "tasks"),
     }));
     const titleToId = new Map(
       planned.map(({ draft, taskId }) => [normalizeTitle(draft.title), taskId]),
@@ -492,35 +490,43 @@ export class BoardStore {
   // are harmless orphans once the goal is gone from the board.
   deleteGoal(goalId: string): ActivityEvent {
     this.getGoal(goalId);
-    this.db.prepare(
-      "UPDATE runs SET status = 'failed', finished_at = ? WHERE task_id IN (SELECT id FROM tasks WHERE goal_id = ?) AND status = 'running'",
-    ).run(timestamp(), goalId);
-    // Delete children explicitly, leaves first. The schema declares ON DELETE
-    // CASCADE, but boards created before those clauses existed keep their
-    // original constraint-free (or cascade-free) tables - CREATE TABLE IF NOT
-    // EXISTS never retrofits them - so relying on cascades either errors or
-    // strands orphans on older DBs.
-    const taskSel = "SELECT id FROM tasks WHERE goal_id = ?";
-    const runSel = `SELECT id FROM runs WHERE task_id IN (${taskSel})`;
-    this.db.prepare(`UPDATE events SET run_id = NULL WHERE run_id IN (${runSel})`).run(goalId);
-    this.db.prepare(`UPDATE events SET task_id = NULL WHERE task_id IN (${taskSel})`).run(goalId);
-    this.db.prepare(`DELETE FROM agent_status WHERE run_id IN (${runSel})`).run(goalId);
-    this.db.prepare(`DELETE FROM runs WHERE task_id IN (${taskSel})`).run(goalId);
-    for (const table of ["file_claims", "messages"]) {
-      this.db.prepare(`DELETE FROM ${table} WHERE task_id IN (${taskSel})`).run(goalId);
+    this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      this.db.prepare(
+        "UPDATE runs SET status = 'failed', finished_at = ? WHERE task_id IN (SELECT id FROM tasks WHERE goal_id = ?) AND status = 'running'",
+      ).run(timestamp(), goalId);
+      // Delete children explicitly, leaves first. The schema declares ON DELETE
+      // CASCADE, but boards created before those clauses existed keep their
+      // original constraint-free (or cascade-free) tables - CREATE TABLE IF NOT
+      // EXISTS never retrofits them - so relying on cascades either errors or
+      // strands orphans on older DBs.
+      const taskSel = "SELECT id FROM tasks WHERE goal_id = ?";
+      const runSel = `SELECT id FROM runs WHERE task_id IN (${taskSel})`;
+      this.db.prepare(`UPDATE events SET run_id = NULL WHERE run_id IN (${runSel})`).run(goalId);
+      this.db.prepare(`UPDATE events SET task_id = NULL WHERE task_id IN (${taskSel})`).run(goalId);
+      this.db.prepare(`DELETE FROM agent_status WHERE run_id IN (${runSel})`).run(goalId);
+      this.db.prepare(`DELETE FROM runs WHERE task_id IN (${taskSel})`).run(goalId);
+      for (const table of ["file_claims", "messages"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE task_id IN (${taskSel})`).run(goalId);
+      }
+      this.db.prepare("DELETE FROM tasks WHERE goal_id = ?").run(goalId);
+      for (const table of ["goal_probes", "goal_messages"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE goal_id = ?`).run(goalId);
+      }
+      this.db.prepare("DELETE FROM goals WHERE id = ?").run(goalId);
+      const event = this.appendEvent(
+        null,
+        null,
+        "user",
+        "delete",
+        `Deleted ${goalId} and its tasks. Any branches/worktrees were left on disk.`,
+      );
+      this.db.exec("COMMIT;");
+      return event;
+    } catch (error) {
+      this.db.exec("ROLLBACK;");
+      throw error;
     }
-    this.db.prepare("DELETE FROM tasks WHERE goal_id = ?").run(goalId);
-    for (const table of ["goal_probes", "goal_messages"]) {
-      this.db.prepare(`DELETE FROM ${table} WHERE goal_id = ?`).run(goalId);
-    }
-    this.db.prepare("DELETE FROM goals WHERE id = ?").run(goalId);
-    return this.appendEvent(
-      null,
-      null,
-      "user",
-      "delete",
-      `Deleted ${goalId} and its tasks. Any branches/worktrees were left on disk.`,
-    );
   }
 
   clearDoneTasks(): { count: number; event: ActivityEvent } {
@@ -1715,20 +1721,22 @@ export class BoardStore {
     return goalId ? events.filter((event) => event.goalId === goalId) : events;
   }
 
-  // A goal's loop conversation for the Thread view, grouped into turns. Primary
-  // path reads goal_id-tagged rows; boards written before goal tagging fall back
-  // to the "${goalId}: " loop-message marker plus lifecycle rows whose payload
-  // goalId matches, so old goals still render. Steers (goal_messages) merge in
-  // by created_at. Capped so the payload stays bounded on long-running goals.
+  // A goal's loop conversation for the Thread view, grouped into turns. Reads
+  // goal_id-tagged rows and legacy "${goalId}: " marker rows, deduped, so mixed
+  // old/new goal history still renders. Steers (goal_messages) merge in by
+  // created_at. Capped so the payload stays bounded on long-running goals.
   getGoalThread(goalId: string): { turns: ThreadTurn[]; truncated: boolean } {
-    const tagged = this.db.prepare(
-      "SELECT COUNT(*) AS c FROM events WHERE goal_id = ?",
-    ).get(goalId) as { c: number };
-    const events = Number(tagged.c) > 0
-      ? (this.db.prepare("SELECT * FROM events WHERE goal_id = ? ORDER BY id ASC").all(
-        goalId,
-      ) as SqlRow[]).map(eventFromRow)
-      : this.legacyGoalEvents(goalId);
+    const eventsById = new Map<number, ActivityEvent>();
+    for (
+      const event of (this.db.prepare("SELECT * FROM events WHERE goal_id = ? ORDER BY id ASC")
+        .all(goalId) as SqlRow[]).map(eventFromRow)
+    ) {
+      eventsById.set(event.id, event);
+    }
+    for (const event of this.legacyGoalEvents(goalId)) {
+      eventsById.set(event.id, event);
+    }
+    const events = [...eventsById.values()].sort((a, b) => a.id - b.id);
 
     // Turn 0 is setup: everything before the first iteration marker. Each
     // iteration marker opens a new turn; entries stay in id order within a turn.
@@ -2163,16 +2171,37 @@ export class BoardStore {
   }
 
   private nextHumanId(prefix: string, table: "goals" | "tasks" | "ideas"): string {
-    return `${prefix}-${this.maxIdNumber(table) + 1}`;
+    const key = `seq:${prefix}`;
+    const seed = this.maxIdNumber(table, prefix);
+    this.db.prepare(
+      "INSERT OR IGNORE INTO project_state (key, value) VALUES (?, ?)",
+    ).run(key, String(seed));
+    const row = this.db.prepare(
+      "UPDATE project_state SET value = CAST(value AS INTEGER) + 1 WHERE key = ? RETURNING value",
+    ).get(key) as { value: string };
+    return `${prefix}-${Number(row.value)}`;
   }
 
   // Ids must survive deletions (Clear Done, manual deletes), so number from the
-  // highest existing suffix rather than the row count.
-  private maxIdNumber(table: "goals" | "tasks" | "ideas"): number {
-    const rows = this.db.prepare(`SELECT id FROM ${table}`).all() as Array<{ id: string }>;
+  // persistent counter, seeded once from current rows and archived event refs.
+  private maxIdNumber(table: "goals" | "tasks" | "ideas", prefix = ""): number {
+    const ids = (this.db.prepare(`SELECT id FROM ${table}`).all() as Array<{ id: string }>)
+      .map((row) => String(row.id));
+    if (prefix === "GOAL") {
+      ids.push(
+        ...(this.db.prepare("SELECT goal_id AS id FROM events WHERE goal_id IS NOT NULL")
+          .all() as Array<{ id: string }>).map((row) => String(row.id)),
+      );
+    }
+    if (prefix === "TASK") {
+      ids.push(
+        ...(this.db.prepare("SELECT task_id AS id FROM events WHERE task_id IS NOT NULL")
+          .all() as Array<{ id: string }>).map((row) => String(row.id)),
+      );
+    }
     let max = 0;
-    for (const row of rows) {
-      const match = String(row.id).match(/-(\d+)$/);
+    for (const id of ids) {
+      const match = id.match(/-(\d+)$/);
       if (match) {
         max = Math.max(max, Number(match[1]));
       }

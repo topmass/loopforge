@@ -139,7 +139,10 @@ Deno.test("FanoutRunner runs disjoint subtasks in parallel worktrees and merges 
     assertEquals(await Deno.readTextFile(`${root}/ui.txt`), "ui\n");
     assert(events.some((e) => e.includes("subagent.spawned")));
     assert(events.some((e) => e.includes("subagent.merged")));
-    assertStringIncludes(summarizeFanout(result), "merged 2 subtask");
+    const summary = summarizeFanout(result);
+    assertStringIncludes(summary, "merged 2 subtask");
+    assertStringIncludes(summary, "./lf-task");
+    assert(!summary.includes("LOOP_PLAN.md"));
 
     // Each fan-out agent mirrored its lifecycle onto the board, ending merged,
     // so the goal-loop path shows up on the Kanban like dispatcher tasks.

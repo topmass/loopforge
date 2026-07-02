@@ -827,6 +827,34 @@ Deno.test("getGoalThread falls back to the message marker for untagged boards", 
   }
 });
 
+Deno.test("getGoalThread includes mixed tagged and legacy goal history", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Mixed thread");
+    store.appendEvent(null, null, "loop", "iteration", `${goal.id}: Loop iteration 1/2 started.`);
+    store.appendEvent(null, null, "loop", "agent", `${goal.id}: legacy work`);
+    store.appendEvent(
+      null,
+      null,
+      "loop",
+      "agent",
+      "tagged work",
+      undefined,
+      goal.id,
+    );
+
+    const entries = store.getGoalThread(goal.id).turns.flatMap((turn) => turn.entries);
+
+    assert(entries.some((entry) => entry.text.includes("legacy work")));
+    assert(entries.some((entry) => entry.text.includes("tagged work")));
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("deleteGoal removes a goal with tasks, runs, probes, and messages", () => {
   const root = Deno.makeTempDirSync();
   const store = new BoardStore(root);
@@ -846,6 +874,26 @@ Deno.test("deleteGoal removes a goal with tasks, runs, probes, and messages", ()
     assertEquals(store.listProbes(goal.id).length, 0);
     // Events survive with their task/run refs cleared, so history stays intact.
     assertEquals(store.getBoard().events.some((e) => e.message === "child event"), true);
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("deleted goal ids are not reused", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Old goal");
+    store.appendEvent(null, null, "loop", "agent", "old tagged event", undefined, goal.id);
+    store.deleteGoal(goal.id);
+
+    const { goal: next } = store.createGoal("New goal");
+
+    assertEquals(next.id, "GOAL-2");
+    const entries = store.getGoalThread(next.id).turns.flatMap((turn) => turn.entries);
+    assert(!entries.some((entry) => entry.text.includes("old tagged event")));
   } finally {
     store.close();
     Deno.removeSync(root, { recursive: true });

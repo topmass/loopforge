@@ -1222,17 +1222,34 @@ Deno.test("server hosts the project registry, CORS, and opens sibling servers", 
     assertEquals(self.current, true);
     assertEquals(self.url, server.url);
 
-    // CORS headers on a normal /api response.
-    const projectsRes = await fetch(`${server.url}/api/projects`);
-    assertEquals(projectsRes.headers.get("access-control-allow-origin"), "*");
+    // CORS reflects only local browser origins.
+    const projectsRes = await fetch(`${server.url}/api/projects`, {
+      headers: { origin: "http://localhost:5173" },
+    });
+    assertEquals(projectsRes.headers.get("access-control-allow-origin"), "http://localhost:5173");
+    assert(projectsRes.headers.get("vary")?.includes("Origin"));
     await projectsRes.json();
+    const evilOrigin = await fetch(`${server.url}/api/projects`, {
+      headers: { origin: "https://evil.example" },
+    });
+    assertEquals(evilOrigin.headers.get("access-control-allow-origin"), null);
+    await evilOrigin.json();
 
     // OPTIONS preflight is answered 204 with the CORS headers before routing.
-    const preflight = await fetch(`${server.url}/api/projects`, { method: "OPTIONS" });
+    const preflight = await fetch(`${server.url}/api/projects`, {
+      method: "OPTIONS",
+      headers: { origin: "http://127.0.0.1:4764" },
+    });
     assertEquals(preflight.status, 204);
-    assertEquals(preflight.headers.get("access-control-allow-origin"), "*");
+    assertEquals(preflight.headers.get("access-control-allow-origin"), "http://127.0.0.1:4764");
     assert(preflight.headers.get("access-control-allow-methods")?.includes("POST"));
     await preflight.body?.cancel();
+    const rejectedPreflight = await fetch(`${server.url}/api/projects`, {
+      method: "OPTIONS",
+      headers: { origin: "https://evil.example" },
+    });
+    assertEquals(rejectedPreflight.headers.get("access-control-allow-origin"), null);
+    await rejectedPreflight.body?.cancel();
 
     // Registering a nonexistent path is a 400.
     const badAdd = await fetch(`${server.url}/api/projects`, {
