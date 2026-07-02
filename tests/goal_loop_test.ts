@@ -769,3 +769,59 @@ Deno.test("goal loop marks a pre-green probe in the first prompt", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("a new goal never inherits a previous goal's LOOP_PLAN.md", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  // A prior goal's finished plan was merged into main (the pre-exclude era).
+  await Deno.writeTextFile(
+    `${root}/LOOP_PLAN.md`,
+    "# Plan\n- [x] Old goal item one -- done long ago\n- [x] Old goal item two -- done long ago\n",
+  );
+  await git(root, ["add", "LOOP_PLAN.md"]);
+  await git(root, ["-c", "user.email=t@t", "-c", "user.name=T", "commit", "-m", "old plan"]);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Fresh goal");
+    store.addProbes(goal.id, [{ label: "fresh exists", command: "test -f fresh.txt" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd) => {
+          await Deno.writeTextFile(
+            `${cwd}/LOOP_PLAN.md`,
+            "# Plan\n- [x] Build fresh thing -- wrote fresh.txt\n",
+          );
+          await Deno.writeTextFile(`${cwd}/fresh.txt`, "fresh\n");
+          return "Done.\nLOOP_COMPLETE";
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "merged");
+    // The inherited plan was cleared BEFORE turn one, so the goal got the full
+    // first prompt (win conditions + contract), not a continuation prompt.
+    assertStringIncludes(client!.prompts[0], "Win conditions");
+    assertStringIncludes(client!.prompts[0], "fresh exists");
+    // No stale step ever reached this goal's board.
+    const feed = store.listLifecycleEvents(goal.id);
+    for (const event of feed.filter((e) => e.kind === "plan.updated")) {
+      const steps = event.data.steps as Array<{ title: string }>;
+      assert(
+        steps.every((s) => !s.title.includes("Old goal item")),
+        `stale step leaked: ${JSON.stringify(steps)}`,
+      );
+    }
+    // The stale tracked file is deleted from main by the merge, and the fresh
+    // plan stays untracked (excluded), so the next goal starts clean too.
+    const planExists = await Deno.stat(`${root}/LOOP_PLAN.md`).then(() => true).catch(() => false);
+    assert(!planExists, "LOOP_PLAN.md should be gone from the merged root");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});

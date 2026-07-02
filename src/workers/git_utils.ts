@@ -236,12 +236,22 @@ async function pathExists(target: string): Promise<boolean> {
 }
 
 export async function ensureWorktreeExcludes(cwd: string): Promise<void> {
-  // Absolute git dir so the exclude path resolves correctly no matter the Deno
-  // process cwd (a relative git-path would point at the wrong directory).
-  const gitDir = (await runCommand(cwd, ["git", "rev-parse", "--absolute-git-dir"])).trim();
+  // Git reads excludes from the COMMON dir's info/exclude, shared by the root
+  // checkout and every linked worktree - the per-worktree git dir
+  // (--absolute-git-dir) has an info/exclude git never consults, which is where
+  // these entries silently went for worktrees before.
+  const gitDir = (await runCommand(cwd, [
+    "git",
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ])).trim();
   const excludePath = path.join(gitDir, "info", "exclude");
   const current = await Deno.readTextFile(excludePath).catch(() => "");
-  const additions = [".omx/", ".loopforge/"].filter((entry) =>
+  // LOOP_PLAN.md is per-goal working memory that lives on disk in the goal's
+  // worktree; committing it made each goal's finished plan merge into main and
+  // seed the NEXT goal's board with stale done items.
+  const additions = [".omx/", ".loopforge/", "LOOP_PLAN.md"].filter((entry) =>
     !current.split(/\r?\n/).includes(entry)
   );
   if (!additions.length) {

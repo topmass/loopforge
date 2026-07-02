@@ -105,6 +105,30 @@ export class GoalLoopRunner {
       branch: assignment.branchName,
       worktree: assignment.worktreePath,
     });
+    // A previous goal's LOOP_PLAN.md (merged into main before the file became
+    // untracked) must not seed this goal: it flips turn one into a continuation
+    // prompt (no win conditions, no fan-out directive) and mirrors finished
+    // items onto the new goal's board. Only a goal that never opened a loop
+    // session resets; resumes keep their own plan.
+    if (!goal.loopThreadId && await this.planFileExists(assignment.worktreePath)) {
+      await runCommand(assignment.worktreePath, [
+        "git",
+        "rm",
+        "--cached",
+        "--ignore-unmatch",
+        LOOP_PLAN_FILE,
+      ]).catch(() => {});
+      await Deno.remove(path.join(assignment.worktreePath, LOOP_PLAN_FILE)).catch(() => {});
+      // Commit the deletion NOW: once the path is out of HEAD, the fresh plan
+      // the model writes is a new untracked path the exclude actually covers
+      // (git re-tracks a recreated path that is still in HEAD, exclude or not).
+      await gitCommitAll(assignment.worktreePath, `${goalId} clear inherited ${LOOP_PLAN_FILE}`);
+      this.emitEvent(
+        goalId,
+        "plan",
+        `Cleared a previous goal's ${LOOP_PLAN_FILE} inherited from the repo.`,
+      );
+    }
     const projectInstructions = await collectAgentsInstructions(this.root);
 
     // A win condition already green before any work cannot prove new work. Run
