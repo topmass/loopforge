@@ -241,6 +241,21 @@ export function Sidebar() {
               No loops yet.
             </div>
           )}
+          {/* "All" scopes the board to every loop (unified view). Lighter than a
+              loop row; selected whenever no single loop is focused. */}
+          {goals.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveGoal(null)}
+              className={`flex w-full items-center rounded-2xl border px-3 py-1.5 text-left text-[11px] font-medium uppercase tracking-wider transition-colors ${
+                activeGoalId === null
+                  ? "border-accent bg-accent-soft text-accent-ink shadow-sm"
+                  : "border-line bg-surface-sunken text-ink-faint hover:text-ink-muted"
+              }`}
+            >
+              All loops
+            </button>
+          )}
           {openGoals.map(renderLoopRow)}
           {closedGoals.length > 0 && (
             <div className="pt-1">

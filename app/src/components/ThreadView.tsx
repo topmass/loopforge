@@ -374,15 +374,14 @@ function EntryRow(
   }
 }
 
-// The Thread composer: steers the ACTIVE goal only. Reuses the ChatBar send
-// logic via useChatSend; disabled (with a nudge to the Board) when closed.
+// The Thread composer: goal-scoped - steers the ACTIVE loop when open, resumes
+// it when closed (addTask resumes server-side). Reuses the ChatBar send logic.
 function ThreadComposer({ goalId, open }: { goalId: string; open: boolean }) {
   const { send, busy, error } = useChatSend();
   const [text, setText] = useState("");
 
   const submit = async () => {
-    if (!open) return;
-    const ok = await send(text, { activeGoalId: goalId, hasOpenGoal: true });
+    const ok = await send(text, { kind: "goal", id: goalId });
     if (ok) setText("");
   };
 
@@ -400,19 +399,18 @@ function ThreadComposer({ goalId, open }: { goalId: string; open: boolean }) {
             }
           }}
           rows={2}
-          disabled={!open}
           placeholder={open
             ? "Steer this loop...  (Enter to send, Shift+Enter for newline)"
-            : "This loop is closed - start a new goal from the Board tab."}
-          className="flex-1 resize-none rounded-2xl border border-line bg-surface-overlay px-4 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-soft disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-ink-faint"
+            : `Describe what to add - this resumes ${goalId}...`}
+          className="flex-1 resize-none rounded-2xl border border-line bg-surface-overlay px-4 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-soft"
         />
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !open}
+          disabled={busy}
           className="rounded-2xl bg-accent-strong px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
-          Steer
+          {open ? "Steer" : "Resume"}
         </button>
       </div>
     </div>

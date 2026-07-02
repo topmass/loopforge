@@ -108,9 +108,7 @@ export function App() {
         <RightPanel tab={rightTab} onTab={setRightTab} />
       </div>
       {/* Board tab keeps the global composer; Thread has its own inline one. */}
-      {centerTab === "board" && (
-        <ChatBar activeGoalId={activeGoalId} hasOpenGoal={activeGoal?.status === "open"} />
-      )}
+      {centerTab === "board" && <ChatBar goal={activeGoal} />}
     </div>
   );
 }

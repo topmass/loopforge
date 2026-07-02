@@ -79,22 +79,27 @@ export function BoardView() {
 
   const goals = board?.goals ?? [];
   const openGoals = goals.filter((g) => g.status === "open");
-  const showGoalChip = openGoals.length > 1;
+  // When a loop is selected the whole board is scoped to it; otherwise the
+  // columns span every goal and cards/groups carry their goal id.
+  const filtered = activeGoalId !== null;
+  const showGoalChip = !filtered && openGoals.length > 1;
   const workers = workerChips(activeWorkers, externalAgents);
 
-  // To Do / In Progress: open goals only, tagged with their goal id.
+  // To Do / In Progress: the selected loop, or every open goal, tagged by id.
+  const columnGoals = filtered ? goals.filter((g) => g.id === activeGoalId) : openGoals;
   const todo: { step: PlanStep; goalId: string }[] = [];
   const doing: { step: PlanStep; goalId: string }[] = [];
-  for (const g of openGoals) {
+  for (const g of columnGoals) {
     for (const step of planByGoal[g.id] ?? []) {
       if (step.status === "todo") todo.push({ step, goalId: g.id });
       else if (step.status === "doing") doing.push({ step, goalId: g.id });
     }
   }
-  // Done: every goal contributes, newest goal group first (goals arrive oldest
-  // first). Plan items append oldest first, so items within a group read newest
-  // first. Empty groups are dropped.
-  const doneGroups = [...goals].reverse().map((g) => ({
+  // Done: the selected loop only, or every goal (newest goal group first: goals
+  // arrive oldest first). Plan items append oldest first, so items within a
+  // group read newest first. Empty groups are dropped.
+  const doneSource = filtered ? goals.filter((g) => g.id === activeGoalId) : [...goals].reverse();
+  const doneGroups = doneSource.map((g) => ({
     goal: g,
     done: (planByGoal[g.id] ?? []).filter((s) => s.status === "done").reverse(),
   })).filter((grp) => grp.done.length > 0);
@@ -247,13 +252,15 @@ export function BoardView() {
           </div>
           {doneGroups.map((grp) => (
             <div key={grp.goal.id} className="flex flex-col gap-2.5">
-              <div className="flex items-center gap-2 px-1 pt-1 text-[11px] text-ink-muted">
-                <span className="rounded-full bg-surface-sunken px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
-                  {grp.goal.id}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{grp.goal.text.slice(0, 40)}</span>
-                <span className="shrink-0 font-mono text-ink-faint">{grp.done.length} done</span>
-              </div>
+              {!filtered && (
+                <div className="flex items-center gap-2 px-1 pt-1 text-[11px] text-ink-muted">
+                  <span className="rounded-full bg-surface-sunken px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
+                    {grp.goal.id}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{grp.goal.text.slice(0, 40)}</span>
+                  <span className="shrink-0 font-mono text-ink-faint">{grp.done.length} done</span>
+                </div>
+              )}
               <AnimatePresence initial={false}>
                 {grp.done.map((step, i) => (
                   <motion.button

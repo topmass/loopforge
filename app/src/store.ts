@@ -106,14 +106,21 @@ export const useStore = create<AppState>((set) => ({
 
   applyBoard: (board) =>
     set((state) => {
-      // The steering target is an OPEN goal; when none are open the board still
-      // renders its Done history and activeGoalId may stay null.
-      const stillOpen = state.activeGoalId !== null &&
-        board.goals.some((g) => g.id === state.activeGoalId && g.status === "open");
+      // A selected loop stays selected while it exists - closed loops are valid
+      // selections (scoped history, resume target). Auto-focus the first open
+      // goal only on the very first board or when the selection was deleted;
+      // once a board exists an explicit "All" (null) choice sticks.
+      const stillExists = state.activeGoalId !== null &&
+        board.goals.some((g) => g.id === state.activeGoalId);
       const openGoal = board.goals.find((g) => g.status === "open");
+      const firstBoard = state.board === null;
       return {
         board,
-        activeGoalId: stillOpen ? state.activeGoalId : openGoal?.id ?? null,
+        activeGoalId: stillExists
+          ? state.activeGoalId
+          : firstBoard || state.activeGoalId !== null
+          ? openGoal?.id ?? null
+          : null,
       };
     }),
 

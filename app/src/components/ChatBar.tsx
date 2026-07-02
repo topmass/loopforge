@@ -1,31 +1,33 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { api } from "../api";
+import type { Goal } from "../types";
 
-// The shared send logic: steer the active OPEN goal (addTask), or start a fresh
-// goal-loop when none is active. Owns busy/error state and returns whether the
-// send landed so the caller can clear its input. Reused by the global ChatBar
-// and the Thread view composer instead of duplicating the branch.
+// Where a composed message goes: a fresh goal-loop, or an explicit goal (addTask
+// steers an open goal and resumes a closed one server-side). The caller picks
+// the target, so nothing is chosen silently.
+export type SendTarget = { kind: "new"; ask?: boolean } | { kind: "goal"; id: string };
+
+// The shared send logic: dispatch on the caller's explicit target. Owns
+// busy/error state and returns whether the send landed so the caller can clear
+// its input. Reused by the global ChatBar and the Thread view composer.
 export function useChatSend() {
   const setActiveGoal = useStore((s) => s.setActiveGoal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const send = async (
-    value: string,
-    opts: { activeGoalId: string | null; hasOpenGoal: boolean; ask?: boolean },
-  ): Promise<boolean> => {
+  const send = async (value: string, target: SendTarget): Promise<boolean> => {
     const trimmed = value.trim();
     if (!trimmed || busy) return false;
     setBusy(true);
     setError(null);
     try {
-      if (opts.activeGoalId && opts.hasOpenGoal) {
-        await api.addTask(opts.activeGoalId, trimmed);
+      if (target.kind === "goal") {
+        await api.addTask(target.id, trimmed);
       } else {
         // Focus the freshly created goal so its planning indicator shows even if
         // a closed goal was the previously active one.
-        const { goalId } = await api.startGoalLoop(trimmed, { questionMode: opts.ask });
+        const { goalId } = await api.startGoalLoop(trimmed, { questionMode: target.ask });
         setActiveGoal(goalId);
       }
       return true;
@@ -40,19 +42,56 @@ export function useChatSend() {
   return { send, busy, error };
 }
 
-export function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | null; hasOpenGoal: boolean }) {
+export function ChatBar({ goal }: { goal: Goal | null }) {
   const { send: sendMessage, busy, error } = useChatSend();
   const [text, setText] = useState("");
   const [ask, setAsk] = useState(false);
+  // With a loop selected the default target is that goal; forceNew routes this
+  // one draft to a fresh loop instead. Reset back to the default after a send.
+  const [forceNew, setForceNew] = useState(false);
+
+  const targetNew = !goal || forceNew;
+  const goalOpen = goal?.status === "open";
+  const target: SendTarget = targetNew ? { kind: "new", ask } : { kind: "goal", id: goal!.id };
 
   const send = async () => {
-    const ok = await sendMessage(text, { activeGoalId, hasOpenGoal, ask });
-    if (ok) setText("");
+    const ok = await sendMessage(text, target);
+    if (ok) {
+      setText("");
+      setForceNew(false);
+    }
   };
 
   return (
     <div className="glass border-x-0 border-b-0 border-t border-line p-3">
       {error && <div className="mb-2 text-xs text-danger">{error}</div>}
+      {/* Explicit target: a fresh loop, or steer/resume the selected loop. */}
+      <div className="mb-2 flex gap-1.5">
+        <button
+          type="button"
+          onClick={() => setForceNew(true)}
+          className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+            targetNew
+              ? "border-accent bg-accent-soft text-accent-ink"
+              : "border-line bg-surface-overlay text-ink-muted"
+          }`}
+        >
+          New loop
+        </button>
+        {goal && (
+          <button
+            type="button"
+            onClick={() => setForceNew(false)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              !targetNew
+                ? "border-accent bg-accent-soft text-accent-ink"
+                : "border-line bg-surface-overlay text-ink-muted"
+            }`}
+          >
+            {goal.id} · {goalOpen ? "add task" : "resume"}
+          </button>
+        )}
+      </div>
       <div className="flex gap-2">
         <textarea
           value={text}
@@ -65,9 +104,11 @@ export function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | 
             }
           }}
           rows={2}
-          placeholder={hasOpenGoal
+          placeholder={targetNew
+            ? "Describe a goal to build...  (Enter to send, Shift+Enter for newline)"
+            : goalOpen
             ? "Add a task / steer the active goal...  (Enter to send, Shift+Enter for newline)"
-            : "Describe a goal to build...  (Enter to send, Shift+Enter for newline)"}
+            : `Describe what to add - this resumes ${goal!.id}...`}
           className="flex-1 resize-none rounded-2xl border border-line bg-surface-overlay px-4 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-soft"
         />
         <button
@@ -76,10 +117,10 @@ export function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | 
           disabled={busy}
           className="rounded-2xl bg-accent-strong px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
-          {hasOpenGoal ? "Add" : "Start"}
+          {targetNew ? "Start" : goalOpen ? "Add" : "Resume"}
         </button>
       </div>
-      {!hasOpenGoal && (
+      {targetNew && (
         <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-xs text-ink-muted">
           <input
             type="checkbox"
