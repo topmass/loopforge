@@ -14,9 +14,21 @@ import type {
 import { parseLifecycle } from "./api";
 
 export type ConnState = "connecting" | "live" | "down";
+export type Theme = "light" | "dark";
+
+// First paint theme: a stored choice wins; otherwise Night Ops (dark) is the
+// flagship default, unless the OS explicitly prefers light.
+function initialTheme(): Theme {
+  const stored = typeof localStorage !== "undefined" ? localStorage.getItem("lf-theme") : null;
+  if (stored === "light" || stored === "dark") return stored;
+  const prefersLight = typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-color-scheme: light)").matches;
+  return prefersLight ? "light" : "dark";
+}
 
 interface AppState {
   conn: ConnState;
+  theme: Theme;
   // Origin of the server the client currently talks to. "" = the primary origin
   // that served the page; a child project's absolute origin when switched to it.
   apiBase: string;
@@ -39,6 +51,7 @@ interface AppState {
   loopActiveAt: Record<string, number>;
 
   setConn: (c: ConnState) => void;
+  setTheme: (t: Theme) => void;
   setApiBase: (base: string) => void;
   resetLive: () => void;
   applyBoard: (b: BoardSnapshot) => void;
@@ -50,6 +63,7 @@ interface AppState {
 
 export const useStore = create<AppState>((set) => ({
   conn: "connecting",
+  theme: initialTheme(),
   apiBase: "",
   board: null,
   runtime: null,
@@ -63,6 +77,16 @@ export const useStore = create<AppState>((set) => ({
   loopActiveAt: {},
 
   setConn: (conn) => set({ conn }),
+
+  // Persist the theme choice; an App effect mirrors it onto <html data-theme>.
+  setTheme: (theme) => {
+    try {
+      localStorage.setItem("lf-theme", theme);
+    } catch {
+      // private mode / no storage: session-only theme is fine
+    }
+    set({ theme });
+  },
 
   // Switching projects: setApiBase flips the origin (an App effect keyed on it
   // reconnects), resetLive drops the previous project's live state before the

@@ -15,7 +15,7 @@ export function DetailPanel() {
   // a gentle prompt instead of collapsing the whole column.
   if (!selectedTaskId) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-slate-400">
+      <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-ink-faint">
         Select a task or sub-agent to see what the agent recorded.
       </div>
     );
@@ -40,21 +40,21 @@ export function DetailPanel() {
     ? sub.state === "merged" ? "merged" : "running"
     : step?.status ?? "unknown";
   const statusColor = statusLabel === "done" || statusLabel === "merged"
-    ? "bg-emerald-100 text-emerald-700"
+    ? "bg-ok-soft text-ok-ink"
     : statusLabel === "doing" || statusLabel === "running"
-    ? "bg-orange-100 text-orange-700"
-    : "bg-slate-300/20 text-slate-700";
+    ? "bg-accent-soft text-accent-ink"
+    : "bg-surface-sunken text-ink";
 
   return (
     <>
-      <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
+      <div className="flex items-start justify-between gap-2 border-b border-line px-4 py-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
             {isSub ? "Sub-agent" : "Task"}
           </div>
-          <div className="truncate text-sm font-semibold text-slate-900">{selectedTaskId}</div>
+          <div className="truncate text-sm font-semibold text-ink">{selectedTaskId}</div>
         </div>
-        <button type="button" onClick={() => selectTask(null)} className="text-slate-500 hover:text-slate-800">
+        <button type="button" onClick={() => selectTask(null)} className="text-ink-muted hover:text-ink">
           ✕
         </button>
       </div>
@@ -66,36 +66,36 @@ export function DetailPanel() {
 
         {(step?.note || subNote) && (
           <div className="mt-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
               What the agent recorded
             </div>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{step?.note ?? subNote}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{step?.note ?? subNote}</p>
           </div>
         )}
 
         {isSub && (
-          <div className="mt-3 rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-violet-700">
+          <div className="mt-3 rounded-md border border-voice-2 bg-voice-2/10 p-2 text-xs text-ink-muted">
             Runs in its own worktree/branch, then merges back into the goal branch.
             {sub!.state === "merged" ? " Merged ✓" : " Working now…"}
           </div>
         )}
 
         {!step?.note && !subNote && !isSub && (
-          <p className="mt-3 text-sm text-slate-500">
+          <p className="mt-3 text-sm text-ink-muted">
             No notes yet - the agent fills this in as it works this item.
           </p>
         )}
 
         {related.length > 0 && (
           <div className="mt-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
               Timeline
             </div>
             <div className="mt-1">
               {related.map((e, i) => (
-                <div key={i} className="border-b border-slate-100 py-1.5 text-xs">
-                  <span className="text-slate-500">{e.kind}</span>
-                  <div className="text-slate-700">{e.summary.slice(0, 200)}</div>
+                <div key={i} className="border-b border-line py-1.5 text-xs">
+                  <span className="text-ink-muted">{e.kind}</span>
+                  <div className="text-ink">{e.summary.slice(0, 200)}</div>
                 </div>
               ))}
             </div>

@@ -19,11 +19,20 @@ export function App() {
   const board = useStore((s) => s.board);
   const activeGoalId = useStore((s) => s.activeGoalId);
   const apiBase = useStore((s) => s.apiBase);
+  const theme = useStore((s) => s.theme);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [centerTab, setCenterTab] = useState<CenterTab>("board");
   const [rightTab, setRightTab] = useState<RightTab>("detail");
   const activeGoal = board?.goals.find((g) => g.id === activeGoalId) ?? null;
   const firstRun = useRef(true);
+
+  // Mirror the theme onto <html> so the token overrides in index.css apply, and
+  // set color-scheme so native form controls / scrollbars match. main.tsx seeds
+  // the initial value before first paint; this keeps it live on toggle.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
   // Project switch: when apiBase changes, re-point the whole client at the newly
   // active server - drop the previous project's live state, refetch its runtime

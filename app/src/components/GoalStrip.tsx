@@ -16,7 +16,7 @@ export function GoalStrip() {
   if (open.length === 0) return null;
   const now = Date.now();
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-2.5">
+    <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
       {open.map((g) => {
         const live = now - (loopActiveAt[g.id] ?? 0) < 90_000;
         const blocked = tasks.some((t) => t.goalId === g.id && t.status === "blocked");
@@ -33,19 +33,19 @@ export function GoalStrip() {
             }}
             className={`group flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
               isArmed
-                ? "border-red-300 bg-red-50"
+                ? "border-danger bg-danger-soft"
                 : active
-                ? "border-orange-300 bg-orange-50 shadow-sm"
-                : "border-slate-200 bg-white hover:border-slate-300"
+                ? "border-accent bg-accent-soft shadow-sm"
+                : "border-line bg-surface-raised hover:border-line-strong"
             }`}
           >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                blocked ? "bg-amber-500" : live ? "animate-pulse bg-orange-500" : "bg-orange-500"
+                blocked ? "bg-warn" : live ? "animate-pulse bg-accent" : "bg-accent"
               }`}
             />
-            <span className="font-medium text-slate-700">{g.id}</span>
-            <span className="max-w-[22ch] truncate text-slate-500">{words}</span>
+            <span className="font-medium text-ink">{g.id}</span>
+            <span className="max-w-[22ch] truncate text-ink-muted">{words}</span>
             {/* x arms; a second click within 4s removes. stopPropagation so the
                 chip's select-on-click never fires from the x. */}
             <span
@@ -61,8 +61,8 @@ export function GoalStrip() {
                 }
               }}
               className={isArmed
-                ? "shrink-0 font-semibold text-red-600"
-                : "shrink-0 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"}
+                ? "shrink-0 font-semibold text-danger"
+                : "shrink-0 text-ink-faint opacity-0 transition hover:text-danger group-hover:opacity-100"}
             >
               {isArmed ? "remove?" : "×"}
             </span>

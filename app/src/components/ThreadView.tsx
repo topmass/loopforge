@@ -16,10 +16,10 @@ const NEAR_BOTTOM_PX = 150;
 // Four muted left-border tints so parallel fan-out agents read as distinct
 // voices; chosen by a hash of the agent title so a title always gets one tone.
 const FANOUT_TINTS = [
-  "border-l-sky-300",
-  "border-l-violet-300",
-  "border-l-teal-300",
-  "border-l-rose-300",
+  "border-l-voice-1",
+  "border-l-voice-2",
+  "border-l-voice-3",
+  "border-l-voice-4",
 ];
 
 function hashIndex(s: string, n: number): number {
@@ -61,12 +61,12 @@ function classify(e: ThreadEntry): EntryRender {
 
 function chipTone(kind: string): string {
   if (["verified", "goal.closed", "subagent.merged", "merge", "finished"].includes(kind)) {
-    return "border-emerald-300 bg-emerald-50 text-emerald-700";
+    return "border-ok bg-ok-soft text-ok-ink";
   }
   if (["goal.blocked", "blocked", "hold"].includes(kind)) {
-    return "border-amber-300 bg-amber-50 text-amber-700";
+    return "border-warn bg-warn-soft text-warn-ink";
   }
-  return "border-slate-200 bg-slate-50 text-slate-500";
+  return "border-line bg-surface-sunken text-ink-muted";
 }
 
 export function ThreadView({ goal }: { goal: Goal | null }) {
@@ -161,7 +161,7 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
 
   if (!goal) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-slate-500">
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-ink-muted">
         <div className="text-lg">Select a loop from the sidebar.</div>
       </div>
     );
@@ -173,18 +173,18 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {thread?.truncated && (
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-1.5 text-center text-[11px] text-slate-400">
+        <div className="border-b border-line bg-surface-sunken px-4 py-1.5 text-center text-[11px] text-ink-faint">
           older turns trimmed
         </div>
       )}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-4">
-          {error && <div className="mb-3 text-center text-xs text-red-600">{error}</div>}
+          {error && <div className="mb-3 text-center text-xs text-danger">{error}</div>}
           {loading && !thread && (
-            <div className="py-10 text-center text-sm text-slate-400">Loading thread...</div>
+            <div className="py-10 text-center text-sm text-ink-faint">Loading thread...</div>
           )}
           {emptyThread && (
-            <div className="py-10 text-center text-sm text-slate-500">
+            <div className="py-10 text-center text-sm text-ink-muted">
               No activity yet - the loop has not started.
             </div>
           )}
@@ -208,7 +208,7 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
           <button
             type="button"
             onClick={jumpToLatest}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm backdrop-blur transition hover:text-slate-900"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-line bg-surface-raised/90 px-3 py-1 text-xs font-medium text-ink-muted shadow-sm backdrop-blur transition hover:text-ink"
           >
             jump to latest
           </button>
@@ -222,13 +222,13 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
 function TurnSeparator({ index, startedAt }: { index: number; startedAt: string | null }) {
   const when = relTime(startedAt);
   return (
-    <div className="flex items-center gap-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-      <span className="h-px flex-1 bg-slate-200" />
+    <div className="flex items-center gap-3 py-1 text-[11px] uppercase tracking-[0.18em] text-ink-faint">
+      <span className="h-px flex-1 bg-line" />
       <span>
         {index === 0 ? "setup" : `turn ${index}`}
-        {when && <span className="ml-2 lowercase tracking-normal text-slate-300">{when}</span>}
+        {when && <span className="ml-2 lowercase tracking-normal text-ink-faint">{when}</span>}
       </span>
-      <span className="h-px flex-1 bg-slate-200" />
+      <span className="h-px flex-1 bg-line" />
     </div>
   );
 }
@@ -244,7 +244,7 @@ function EntryRow(
     case "user":
       return (
         <div className="flex justify-end">
-          <div className="max-w-[70%] whitespace-pre-wrap rounded-2xl bg-orange-50 px-4 py-2.5 text-sm text-orange-900">
+          <div className="max-w-[70%] whitespace-pre-wrap rounded-2xl bg-accent-soft px-4 py-2.5 text-sm text-accent-ink">
             {entry.text}
           </div>
         </div>
@@ -255,13 +255,13 @@ function EntryRow(
       const shown = long && !open ? entry.text.slice(0, AGENT_COLLAPSE) : entry.text;
       return (
         <div className="flex justify-start">
-          <div className="max-w-[85%] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm">
+          <div className="max-w-[85%] rounded-2xl border border-line bg-surface-raised px-4 py-3 text-sm leading-relaxed text-ink shadow-sm">
             <div className="whitespace-pre-wrap">{shown}{long && !open ? "..." : ""}</div>
             {long && (
               <button
                 type="button"
                 onClick={onToggle}
-                className="mt-2 text-xs font-medium text-orange-600 hover:text-orange-700"
+                className="mt-2 text-xs font-medium text-accent hover:text-accent-ink"
               >
                 {open ? "show less" : "show more"}
               </button>
@@ -278,9 +278,9 @@ function EntryRow(
           onClick={onToggle}
           className="flex w-full items-start gap-2 text-left"
         >
-          <span className="mt-0.5 shrink-0 text-slate-400">{"\u{1F527}"}</span>
+          <span className="mt-0.5 shrink-0 text-ink-faint">{"\u{1F527}"}</span>
           <span
-            className={`min-w-0 flex-1 font-mono text-xs text-slate-500 ${
+            className={`min-w-0 flex-1 font-mono text-xs text-ink-muted ${
               open ? "whitespace-pre-wrap" : "truncate"
             }`}
           >
@@ -291,7 +291,7 @@ function EntryRow(
 
     case "task":
       return (
-        <div className="flex items-start gap-2 text-xs text-slate-500">
+        <div className="flex items-start gap-2 text-xs text-ink-muted">
           <span className="mt-px shrink-0">{"☐"}</span>
           <span className="min-w-0 flex-1 truncate">{stripGoalPrefix(entry.text)}</span>
         </div>
@@ -306,11 +306,11 @@ function EntryRow(
           onClick={onToggle}
           className={`flex w-full flex-col items-start border-l-2 pl-3 text-left ${tint}`}
         >
-          <span className="w-full truncate text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <span className="w-full truncate text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
             {title}
           </span>
           <span
-            className={`w-full text-xs text-slate-500 ${open ? "whitespace-pre-wrap" : "truncate"}`}
+            className={`w-full text-xs text-ink-muted ${open ? "whitespace-pre-wrap" : "truncate"}`}
           >
             {entry.text}
           </span>
@@ -349,8 +349,8 @@ function ThreadComposer({ goalId, open }: { goalId: string; open: boolean }) {
   };
 
   return (
-    <div className="glass border-x-0 border-b-0 border-t border-slate-200 p-3">
-      {error && <div className="mb-2 text-xs text-red-600">{error}</div>}
+    <div className="glass border-x-0 border-b-0 border-t border-line p-3">
+      {error && <div className="mb-2 text-xs text-danger">{error}</div>}
       <div className="flex gap-2">
         <textarea
           value={text}
@@ -366,13 +366,13 @@ function ThreadComposer({ goalId, open }: { goalId: string; open: boolean }) {
           placeholder={open
             ? "Steer this loop...  (Enter to send, Shift+Enter for newline)"
             : "This loop is closed - start a new goal from the Board tab."}
-          className="flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-300 focus:ring-2 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+          className="flex-1 resize-none rounded-2xl border border-line bg-surface-overlay px-4 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-soft disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-ink-faint"
         />
         <button
           type="button"
           onClick={() => void submit()}
           disabled={busy || !open}
-          className="rounded-2xl bg-orange-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700 disabled:opacity-50"
+          className="rounded-2xl bg-accent px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
           Steer
         </button>

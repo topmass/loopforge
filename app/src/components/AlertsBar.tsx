@@ -41,24 +41,24 @@ export function AlertsBar() {
   };
 
   return (
-    <div className="border-b border-amber-200 bg-amber-50">
+    <div className="border-b border-warn bg-warn-soft">
       {blocked.map((e, i) => (
         <div key={`b-${i}`} className="flex items-start gap-2 px-4 py-2 text-sm">
-          <span className="mt-0.5 text-amber-700">needs you</span>
-          <span className="text-amber-900">{e.summary}</span>
+          <span className="mt-0.5 text-warn-ink">needs you</span>
+          <span className="text-warn-ink">{e.summary}</span>
         </div>
       ))}
       {holds.map((t) => (
         <div key={t.id} className="flex items-center gap-3 px-4 py-2 text-sm">
-          <span className="text-amber-700">verify by hand</span>
-          <span className="flex-1 truncate text-amber-900">
+          <span className="text-warn-ink">verify by hand</span>
+          <span className="flex-1 truncate text-warn-ink">
             {t.needsInputPrompt?.split("\n")[0] ?? t.title}
           </span>
           <button
             type="button"
             onClick={() => void signOff(t.id)}
             disabled={busy === t.id}
-            className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+            className="rounded-md bg-ok px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50"
           >
             {busy === t.id ? "merging..." : "Verify & merge"}
           </button>

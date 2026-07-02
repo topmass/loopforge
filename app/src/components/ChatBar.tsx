@@ -51,8 +51,8 @@ export function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | 
   };
 
   return (
-    <div className="glass border-x-0 border-b-0 border-t border-slate-200 p-3">
-      {error && <div className="mb-2 text-xs text-red-600">{error}</div>}
+    <div className="glass border-x-0 border-b-0 border-t border-line p-3">
+      {error && <div className="mb-2 text-xs text-danger">{error}</div>}
       <div className="flex gap-2">
         <textarea
           value={text}
@@ -68,24 +68,24 @@ export function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | 
           placeholder={hasOpenGoal
             ? "Add a task / steer the active goal...  (Enter to send, Shift+Enter for newline)"
             : "Describe a goal to build...  (Enter to send, Shift+Enter for newline)"}
-          className="flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+          className="flex-1 resize-none rounded-2xl border border-line bg-surface-overlay px-4 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-soft"
         />
         <button
           type="button"
           onClick={() => void send()}
           disabled={busy}
-          className="rounded-2xl bg-orange-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-700 disabled:opacity-50"
+          className="rounded-2xl bg-accent px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
           {hasOpenGoal ? "Add" : "Start"}
         </button>
       </div>
       {!hasOpenGoal && (
-        <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-xs text-slate-500">
+        <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-xs text-ink-muted">
           <input
             type="checkbox"
             checked={ask}
             onChange={(e) => setAsk(e.target.checked)}
-            className="accent-orange-500"
+            className="accent-accent"
           />
           Ask clarifying questions first (like Codex plan mode)
         </label>

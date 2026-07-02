@@ -15,17 +15,19 @@ export function TopBar(
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
   const activity = useStore((s) => s.activity);
-  const dot = conn === "live" ? "bg-emerald-500" : conn === "down" ? "bg-red-400" : "bg-amber-400";
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
+  const dot = conn === "live" ? "bg-ok" : conn === "down" ? "bg-danger" : "bg-warn";
 
   const role = (label: string, value: string, on = true) => (
     <button
       type="button"
       onClick={onSettings}
-      className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs hover:border-slate-600"
+      className="flex items-center gap-1.5 rounded-full border border-line bg-surface-raised px-2.5 py-0.5 text-xs hover:border-line-strong"
       title="Open model settings"
     >
-      <span className="text-slate-500">{label}</span>
-      <span className={on ? "text-slate-800" : "text-slate-400"}>{value}</span>
+      <span className="text-ink-muted">{label}</span>
+      <span className={on ? "text-ink" : "text-ink-faint"}>{value}</span>
     </button>
   );
   // The most recent loop/agent line is "what it's doing now".
@@ -34,15 +36,15 @@ export function TopBar(
   );
 
   return (
-    <header className="glass flex items-center gap-3 border-x-0 border-t-0 border-b border-slate-200 px-4 py-2.5">
+    <header className="glass flex items-center gap-3 border-x-0 border-t-0 border-b border-line px-4 py-2.5">
       <span className="text-lg font-semibold tracking-tight">
-        Loop<span className="text-orange-600">Forge</span>
+        Loop<span className="text-accent">Forge</span>
       </span>
       <button
         type="button"
         onClick={onSettings}
         title="Model settings"
-        className="text-xs text-slate-500 hover:text-slate-800"
+        className="text-xs text-ink-muted hover:text-ink"
       >
         {runtime?.backend ?? "connecting..."} ⚙
       </button>
@@ -55,22 +57,32 @@ export function TopBar(
         </>
       )}
       {now && (
-        <span className="ml-2 flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
-          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-orange-500" />
+        <span className="ml-2 flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
           <span className="truncate">{now.message.slice(0, 90)}</span>
         </span>
       )}
       <div className="ml-auto flex items-center gap-3">
         <button
           type="button"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title={theme === "dark"
+            ? "Switch to Paper Terminal (light)"
+            : "Switch to Night Ops (dark)"}
+          className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition hover:text-ink"
+        >
+          {theme === "dark" ? "☀" : "☾"}
+        </button>
+        <button
+          type="button"
           onClick={onActivity}
-          className={`rounded-md border border-slate-200 px-3 py-1 text-xs ${
-            activityActive ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
+          className={`rounded-md border border-line px-3 py-1 text-xs ${
+            activityActive ? "bg-ink text-surface" : "text-ink-muted hover:text-ink"
           }`}
         >
           Activity
         </button>
-        <span className="flex items-center gap-1.5 text-xs text-slate-500">
+        <span className="flex items-center gap-1.5 text-xs text-ink-muted">
           <span className={`h-2 w-2 rounded-full ${dot}`} />
           {conn}
         </span>

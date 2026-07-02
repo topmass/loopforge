@@ -12,10 +12,10 @@ export function CenterTabs({ tab, onTab }: { tab: CenterTab; onTab: (t: CenterTa
   const live = lastActive !== undefined && Date.now() - lastActive < 120_000;
   const tabClass = (active: boolean) =>
     `rounded-md px-3 py-1 text-xs font-medium transition ${
-      active ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
+      active ? "bg-ink text-surface" : "text-ink-muted hover:text-ink"
     }`;
   return (
-    <div className="glass-soft flex items-center gap-1 border-x-0 border-t-0 border-b border-slate-200 px-3 py-1.5">
+    <div className="glass-soft flex items-center gap-1 border-x-0 border-t-0 border-b border-line px-3 py-1.5">
       <button type="button" onClick={() => onTab("board")} className={tabClass(tab === "board")}>
         Board
       </button>
@@ -25,7 +25,7 @@ export function CenterTabs({ tab, onTab }: { tab: CenterTab; onTab: (t: CenterTa
         className={`flex items-center gap-1.5 ${tabClass(tab === "thread")}`}
       >
         Thread
-        {live && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
+        {live && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
       </button>
     </div>
   );

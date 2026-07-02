@@ -103,10 +103,10 @@ export function Sidebar() {
   });
   const now = Date.now();
   const loopDot = (g: Goal): string => {
-    if (g.status === "closed") return "bg-emerald-500";
-    if (lastKindByGoal.get(g.id) === "goal.blocked") return "bg-amber-500";
-    if (now - (loopActiveAt[g.id] ?? 0) < 120_000) return "animate-pulse bg-orange-500";
-    return "bg-slate-400";
+    if (g.status === "closed") return "bg-ok";
+    if (lastKindByGoal.get(g.id) === "goal.blocked") return "bg-warn";
+    if (now - (loopActiveAt[g.id] ?? 0) < 120_000) return "animate-pulse bg-accent";
+    return "bg-ink-faint";
   };
   const renderLoopRow = (g: Goal) => {
     const active = g.id === activeGoalId;
@@ -121,17 +121,17 @@ export function Sidebar() {
         }}
         className={`group flex w-full min-w-0 items-center gap-2 rounded-2xl border px-3 py-2 text-left transition-colors ${
           isArmed
-            ? "border-red-300 bg-red-50"
+            ? "border-danger bg-danger-soft"
             : active
-            ? "border-orange-300 bg-orange-50 shadow-sm"
-            : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+            ? "border-accent bg-accent-soft shadow-sm"
+            : "border-line bg-surface-sunken hover:bg-surface-sunken"
         }`}
       >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${loopDot(g)}`} />
-        <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+        <span className="shrink-0 rounded-full bg-surface-sunken px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
           {g.id}
         </span>
-        <span className="min-w-0 flex-1 truncate text-xs text-slate-600">{g.text}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">{g.text}</span>
         {/* Same arm-then-confirm delete as the goal chips. */}
         <span
           role="button"
@@ -146,8 +146,8 @@ export function Sidebar() {
             }
           }}
           className={isArmed
-            ? "shrink-0 text-[11px] font-semibold text-red-600"
-            : "shrink-0 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"}
+            ? "shrink-0 text-[11px] font-semibold text-danger"
+            : "shrink-0 text-ink-faint opacity-0 transition hover:text-danger group-hover:opacity-100"}
         >
           {isArmed ? "remove?" : "×"}
         </span>
@@ -156,14 +156,14 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="glass-soft flex w-64 shrink-0 flex-col border-r border-slate-200">
+    <aside className="glass-soft flex w-64 shrink-0 flex-col border-r border-line">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="px-4 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <div className="px-4 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
           Projects
         </div>
         <div className="space-y-1.5 px-3 pb-3 pt-2">
           {projects.length === 0 && (
-            <div className="px-2 py-2 text-sm text-slate-500">
+            <div className="px-2 py-2 text-sm text-ink-muted">
               No projects yet. Add one below.
             </div>
           )}
@@ -180,20 +180,20 @@ export function Sidebar() {
                 }}
                 className={`group flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
                   isArmed
-                    ? "border-red-300 bg-red-50"
+                    ? "border-danger bg-danger-soft"
                     : active
-                    ? "border-orange-300 bg-orange-50 shadow-sm"
-                    : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                    ? "border-accent bg-accent-soft shadow-sm"
+                    : "border-line bg-surface-sunken hover:bg-surface-sunken"
                 }`}
               >
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-orange-100 text-sm">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-accent-soft text-sm">
                   🛠
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={`block truncate text-sm font-semibold ${active ? "text-slate-900" : "text-slate-700"}`}>
+                  <span className={`block truncate text-sm font-semibold ${active ? "text-ink" : "text-ink"}`}>
                     {p.name}
                   </span>
-                  <span className="block truncate text-[11px] text-slate-500" title={p.root}>
+                  <span className="block truncate text-[11px] text-ink-muted" title={p.root}>
                     {p.root}
                   </span>
                 </span>
@@ -209,8 +209,8 @@ export function Sidebar() {
                       else arm(p.root);
                     }}
                     className={isArmed
-                      ? "shrink-0 text-xs font-semibold text-red-600"
-                      : "shrink-0 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"}
+                      ? "shrink-0 text-xs font-semibold text-danger"
+                      : "shrink-0 text-ink-faint opacity-0 transition hover:text-danger group-hover:opacity-100"}
                   >
                     {isArmed ? "remove?" : "×"}
                   </span>
@@ -220,12 +220,12 @@ export function Sidebar() {
           })}
         </div>
 
-        <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
           Loops
         </div>
         <div className="space-y-1 px-3 pb-3">
           {goals.length === 0 && (
-            <div className="px-2 py-1 text-sm text-slate-500">No loops yet.</div>
+            <div className="px-2 py-1 text-sm text-ink-muted">No loops yet.</div>
           )}
           {openGoals.map(renderLoopRow)}
           {closedGoals.length > 0 && (
@@ -233,10 +233,10 @@ export function Sidebar() {
               <button
                 type="button"
                 onClick={() => setHistoryOpen((v) => !v)}
-                className="flex w-full items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-slate-400 transition hover:text-slate-600"
+                className="flex w-full items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-ink-faint transition hover:text-ink-muted"
               >
                 <span>{historyOpen ? "▾" : "▸"}</span>
-                history <span className="text-slate-400">{closedGoals.length}</span>
+                history <span className="text-ink-faint">{closedGoals.length}</span>
               </button>
               {historyOpen && <div className="mt-1 space-y-1">{closedGoals.map(renderLoopRow)}</div>}
             </div>
@@ -245,8 +245,8 @@ export function Sidebar() {
       </div>
 
       {/* Add a project by absolute path, or browse for one; the server validates it. */}
-      <div className="border-t border-slate-200 px-3 py-3">
-        {error && <div className="mb-2 text-xs text-red-600">{error}</div>}
+      <div className="border-t border-line px-3 py-3">
+        {error && <div className="mb-2 text-xs text-danger">{error}</div>}
         <div className="flex gap-1.5">
           <input
             value={pathInput}
@@ -258,13 +258,13 @@ export function Sidebar() {
               }
             }}
             placeholder="/absolute/path/to/repo"
-            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-300"
+            className="min-w-0 flex-1 rounded-xl border border-line bg-surface-overlay px-2.5 py-1.5 text-xs text-ink outline-none transition placeholder:text-ink-faint focus:border-accent"
           />
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
             title="Browse folders"
-            className="rounded-xl border border-slate-200 bg-white px-2.5 text-xs text-slate-600 transition hover:bg-slate-100"
+            className="rounded-xl border border-line bg-surface-raised px-2.5 text-xs text-ink-muted transition hover:bg-surface-sunken"
           >
             📁
           </button>
@@ -272,7 +272,7 @@ export function Sidebar() {
             type="button"
             onClick={() => void add()}
             disabled={busy}
-            className="rounded-xl bg-orange-600 px-3 text-xs font-semibold text-white transition hover:bg-orange-700 disabled:opacity-50"
+            className="rounded-xl bg-accent px-3 text-xs font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "..." : "Add"}
           </button>

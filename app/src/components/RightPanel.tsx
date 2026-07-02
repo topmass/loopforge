@@ -11,11 +11,11 @@ export type RightTab = "detail" | "activity" | "diff";
 export function RightPanel({ tab, onTab }: { tab: RightTab; onTab: (t: RightTab) => void }) {
   const tabClass = (active: boolean) =>
     `rounded-md px-3 py-1 text-xs font-medium transition ${
-      active ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
+      active ? "bg-ink text-surface" : "text-ink-muted hover:text-ink"
     }`;
   return (
-    <aside className="glass flex w-96 shrink-0 flex-col border-y-0 border-r-0 border-l border-slate-200">
-      <div className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
+    <aside className="glass flex w-96 shrink-0 flex-col border-y-0 border-r-0 border-l border-line">
+      <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
         <button type="button" onClick={() => onTab("detail")} className={tabClass(tab === "detail")}>
           Detail
         </button>

@@ -1,35 +1,161 @@
 @import "tailwindcss";
 
-/* Light editorial theme (Hermes-inspired): warm off-white canvas, white cards
-   with soft shadows, calm muted accents, generous whitespace. Helpful
-   automation, controlled truth - a professional, trustworthy SaaS feel. */
+/* Design-token layer for the two flagship themes.
+
+   Paper Terminal (light, default `:root`) is today's warm editorial look,
+   sharpened. Night Ops (dark, `[data-theme="dark"]`) is the same UI over a warm
+   charcoal token set. Components use ONLY the semantic utilities generated from
+   these tokens (bg-surface, text-ink, border-line, bg-accent-soft, ...); there
+   are zero `dark:` variants anywhere. Theme switching is a single attribute on
+   <html> that swaps the underlying `--t-*` custom properties below.
+
+   The `@theme inline` block maps Tailwind color tokens to the `--t-*` vars so
+   utilities resolve the var at use-site - overriding a `--t-*` value on
+   [data-theme="dark"] instantly re-tints every utility. */
+@theme inline {
+  --color-surface: var(--t-surface);
+  --color-surface-raised: var(--t-surface-raised);
+  --color-surface-overlay: var(--t-surface-overlay);
+  --color-surface-sunken: var(--t-surface-sunken);
+
+  --color-ink: var(--t-ink);
+  --color-ink-muted: var(--t-ink-muted);
+  --color-ink-faint: var(--t-ink-faint);
+
+  --color-line: var(--t-line);
+  --color-line-strong: var(--t-line-strong);
+
+  --color-accent: var(--t-accent);
+  --color-accent-soft: var(--t-accent-soft);
+  --color-accent-ink: var(--t-accent-ink);
+  --color-on-accent: var(--t-on-accent);
+
+  --color-ok: var(--t-ok);
+  --color-ok-soft: var(--t-ok-soft);
+  --color-ok-ink: var(--t-ok-ink);
+
+  --color-warn: var(--t-warn);
+  --color-warn-soft: var(--t-warn-soft);
+  --color-warn-ink: var(--t-warn-ink);
+
+  --color-danger: var(--t-danger);
+  --color-danger-soft: var(--t-danger-soft);
+  --color-danger-ink: var(--t-danger-ink);
+
+  --color-voice-1: var(--t-voice-1);
+  --color-voice-2: var(--t-voice-2);
+  --color-voice-3: var(--t-voice-3);
+  --color-voice-4: var(--t-voice-4);
+
+  --color-scrim: var(--t-scrim);
+}
+
+/* Fonts are static tokens (non-inline) so `--font-sans` / `--font-mono` are
+   emitted to :root and `var(--font-sans)` resolves. Space Grotesk (variable) for
+   UI, JetBrains Mono for machine-flavored text (ids, probes, tools, diffs). */
+@theme {
+  --font-sans: "Space Grotesk Variable", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Paper Terminal (light) - the underlying values. */
 :root {
   color-scheme: light;
-  --bg: #f4f4f1;        /* warm off-white canvas */
-  --ink: #1b2330;       /* near-black slate, primary text */
-  --muted: #6b7280;     /* secondary text */
-  --faint: #9aa1ac;     /* labels / tertiary */
-  --card: #ffffff;
-  --line: #e8e7e2;      /* hairline borders */
-  --accent: #c2570e;    /* muted terracotta - brand / active, used sparingly */
-  --accent-soft: #fdf0e6;
-  --done: #0f766e;      /* deep teal - completed/merged */
-  --done-soft: #ecf6f4;
+
+  --t-surface: #f4f4f1;
+  --t-surface-raised: #ffffff;
+  --t-surface-overlay: #ffffff;
+  --t-surface-sunken: #ece9e2;
+
+  --t-ink: #232733;
+  --t-ink-muted: #616874;
+  --t-ink-faint: #737985;
+
+  --t-line: #e8e7e2;
+  --t-line-strong: #d8d6cf;
+
+  --t-accent: #ea580c;
+  --t-accent-soft: #ffedd5;
+  --t-accent-ink: #9a3412;
+  --t-on-accent: #ffffff;
+
+  --t-ok: #059669;
+  --t-ok-soft: #d1fae5;
+  --t-ok-ink: #065f46;
+
+  --t-warn: #d97706;
+  --t-warn-soft: #fef3c7;
+  --t-warn-ink: #92400e;
+
+  --t-danger: #dc2626;
+  --t-danger-soft: #fee2e2;
+  --t-danger-ink: #991b1b;
+
+  --t-voice-1: #7dd3fc;
+  --t-voice-2: #c4b5fd;
+  --t-voice-3: #5eead4;
+  --t-voice-4: #fda4af;
+
+  --t-scrim: rgba(0, 0, 0, 0.40);
+}
+
+/* Night Ops (dark) - warm charcoal, never blue-black. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --t-surface: #16130e;
+  --t-surface-raised: #1e1a13;
+  --t-surface-overlay: #252017;
+  --t-surface-sunken: #100e0a;
+
+  --t-ink: #ece7dc;
+  --t-ink-muted: #a89f8f;
+  --t-ink-faint: #8a8172;
+
+  --t-line: #2e2820;
+  --t-line-strong: #3d362b;
+
+  --t-accent: #f59e0b;
+  --t-accent-soft: rgba(245, 158, 11, 0.14);
+  --t-accent-ink: #fbbf24;
+  --t-on-accent: #17140f;
+
+  --t-ok: #34d399;
+  --t-ok-soft: rgba(52, 211, 153, 0.14);
+  --t-ok-ink: #6ee7b7;
+
+  --t-warn: #fbbf24;
+  --t-warn-soft: rgba(251, 191, 36, 0.14);
+  --t-warn-ink: #fcd34d;
+
+  --t-danger: #f87171;
+  --t-danger-soft: rgba(248, 113, 113, 0.14);
+  --t-danger-ink: #fca5a5;
+
+  --t-voice-1: #56a8d4;
+  --t-voice-2: #a58fd8;
+  --t-voice-3: #4fbfa8;
+  --t-voice-4: #d48fa0;
+
+  --t-scrim: rgba(0, 0, 0, 0.60);
 }
 
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--t-surface);
+  color: var(--t-ink);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   letter-spacing: -0.01em;
   overflow: hidden;
 }
 
-/* A very faint warm wash in the corners - editorial calm, not a light show. */
+/* A very faint token-driven wash in the corners - editorial calm in Paper,
+   a warm ember glow in Night Ops, subtle in both. */
 #root::before {
   content: "";
   position: fixed;
@@ -37,56 +163,61 @@ body {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(55% 45% at 8% 0%, rgba(194, 87, 14, 0.05), transparent 60%),
-    radial-gradient(50% 50% at 100% 100%, rgba(15, 118, 110, 0.04), transparent 60%);
+    radial-gradient(55% 45% at 8% 0%, color-mix(in srgb, var(--t-accent) 7%, transparent), transparent 60%),
+    radial-gradient(50% 50% at 100% 100%, color-mix(in srgb, var(--t-ok) 6%, transparent), transparent 60%);
 }
 #root > * { position: relative; z-index: 1; }
 
-/* White card with a soft editorial shadow. */
+/* Raised card with a soft editorial shadow. */
 .card {
-  background: var(--card);
-  border: 1px solid var(--line);
+  background: var(--t-surface-raised);
+  border: 1px solid var(--t-line);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 14px 30px -20px rgba(16, 24, 40, 0.28);
 }
 
 /* Flat translucent surface for chrome (bars, sidebar) over the canvas. */
 .surface {
-  background: rgba(255, 255, 255, 0.7);
+  background: color-mix(in srgb, var(--t-surface-raised) 70%, transparent);
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
 }
 
-/* Outlined uppercase status chip - the Hermes pill. */
+/* Outlined uppercase status chip. */
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--t-line);
   border-radius: 999px;
   padding: 0.15rem 0.6rem;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--t-ink-muted);
   white-space: nowrap;
 }
 
-/* Back-compat: existing components use .glass/.glass-soft; render them as light
-   frosted surfaces so the whole app reads as one coherent light theme. */
+/* Existing chrome uses .glass/.glass-soft; frosted surfaces built from the
+   raised token so both themes read as one coherent theme. */
 .glass {
-  background: rgba(255, 255, 255, 0.85);
+  background: color-mix(in srgb, var(--t-surface-raised) 85%, transparent);
   backdrop-filter: blur(12px) saturate(1.1);
   -webkit-backdrop-filter: blur(12px) saturate(1.1);
-  border: 1px solid var(--line);
+  border: 1px solid var(--t-line);
 }
 .glass-soft {
-  background: rgba(255, 255, 255, 0.6);
+  background: color-mix(in srgb, var(--t-surface-raised) 60%, transparent);
   backdrop-filter: blur(10px) saturate(1.05);
   -webkit-backdrop-filter: blur(10px) saturate(1.05);
 }
 
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: rgba(16, 24, 40, 0.14); border-radius: 8px; }
-*::-webkit-scrollbar-thumb:hover { background: rgba(16, 24, 40, 0.22); }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--t-ink) 16%, transparent);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--t-ink) 26%, transparent);
+}
 *::-webkit-scrollbar-track { background: transparent; }

@@ -1,5 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "@fontsource-variable/space-grotesk/index.css";
+import "@fontsource/jetbrains-mono/index.css";
 import "./index.css";
 import { App } from "./App";
 import { api, subscribe } from "./api";
@@ -46,6 +48,11 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+// Seed the theme onto <html> before first paint to avoid a flash (the store
+// resolved it synchronously from localStorage / prefers-color-scheme).
+document.documentElement.dataset.theme = useStore.getState().theme;
+document.documentElement.style.colorScheme = useStore.getState().theme;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

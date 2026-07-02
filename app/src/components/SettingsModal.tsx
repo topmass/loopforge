@@ -51,17 +51,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       onChange: (v: string) => void;
     },
   ) => (
-    <div className="flex items-center justify-between gap-3 border-b border-slate-200 py-3">
+    <div className="flex items-center justify-between gap-3 border-b border-line py-3">
       <div>
-        <div className="text-sm font-medium text-slate-800">{label}</div>
-        <div className="text-xs text-slate-500">{help}</div>
+        <div className="text-sm font-medium text-ink">{label}</div>
+        <div className="text-xs text-ink-muted">{help}</div>
       </div>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+        className="rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
       >
-        {["off", ...BACKENDS].map((b) => <option key={b} value={b} className="bg-white">{b}</option>)}
+        {["off", ...BACKENDS].map((b) => <option key={b} value={b} className="bg-surface-overlay">{b}</option>)}
       </select>
     </div>
   );
@@ -71,7 +71,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/20 backdrop-blur-sm"
+      className="absolute inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div
@@ -84,23 +84,23 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       >
         <div className="mb-3 flex items-center justify-between">
           <span className="text-base font-semibold">Model settings</span>
-          <button type="button" onClick={onClose} className="text-slate-500 transition-colors hover:text-slate-800">✕</button>
+          <button type="button" onClick={onClose} className="text-ink-muted transition-colors hover:text-ink">✕</button>
         </div>
-        {saving && <div className="mb-2 text-xs text-orange-600">Saving {saving}...</div>}
+        {saving && <div className="mb-2 text-xs text-accent">Saving {saving}...</div>}
 
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 py-3">
+        <div className="flex items-center justify-between gap-3 border-b border-line py-3">
           <div>
-            <div className="text-sm font-medium text-slate-800">Main agent</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-sm font-medium text-ink">Main agent</div>
+            <div className="text-xs text-ink-muted">
               The model the loop owner and workers run on. ({runtime?.backend ?? "?"})
             </div>
           </div>
           <select
             value={runtime?.backendRaw ?? "codex"}
             onChange={(e) => void wrap("main backend", () => api.setBackend(e.target.value))}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+            className="rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
           >
-            {BACKENDS.map((b) => <option key={b} value={b} className="bg-white">{b}</option>)}
+            {BACKENDS.map((b) => <option key={b} value={b} className="bg-surface-overlay">{b}</option>)}
           </select>
         </div>
 
@@ -130,17 +130,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         />
 
         {/* Model power: codex knobs (per-project) + the Claude model (machine-wide). */}
-        <div className="border-b border-slate-200 py-3">
-          <div className="text-sm font-medium text-slate-800">Model power</div>
-          <div className="text-xs text-slate-500">
+        <div className="border-b border-line py-3">
+          <div className="text-sm font-medium text-ink">Model power</div>
+          <div className="text-xs text-ink-muted">
             How hard the models think. codex is per-project; claude is machine-wide.
           </div>
 
           <div className="mt-3 space-y-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
               codex
               {runtime?.backendRaw === "codex" && (
-                <span className="ml-2 rounded-full bg-orange-100 px-1.5 py-0.5 font-medium normal-case tracking-normal text-orange-700">
+                <span className="ml-2 rounded-full bg-accent-soft px-1.5 py-0.5 font-medium normal-case tracking-normal text-accent-ink">
                   main agent
                 </span>
               )}
@@ -151,11 +151,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               placeholder="model id (e.g. gpt-5.4)"
               onBlur={(e) =>
                 void wrap("codex model", () => api.setConfig({ model: e.target.value.trim() }))}
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+              className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
             />
             <div className="flex items-center gap-2">
-              <span className="w-16 shrink-0 text-xs text-slate-500">reasoning</span>
-              <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+              <span className="w-16 shrink-0 text-xs text-ink-muted">reasoning</span>
+              <div className="flex flex-1 items-center gap-1 rounded-xl border border-line bg-surface-sunken p-1">
                 {REASONING.map((r) => {
                   const on = runtime?.config?.reasoningEffort === r;
                   return (
@@ -165,7 +165,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("reasoning", () => api.setConfig({ reasoningEffort: r }))}
                       className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                        on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+                        on ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {r}
@@ -175,8 +175,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-16 shrink-0 text-xs text-slate-500">speed</span>
-              <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+              <span className="w-16 shrink-0 text-xs text-ink-muted">speed</span>
+              <div className="flex flex-1 items-center gap-1 rounded-xl border border-line bg-surface-sunken p-1">
                 {([["fast", true], ["normal", false]] as const).map(([label, fast]) => {
                   const on = !!runtime?.config?.fastMode === fast;
                   return (
@@ -186,7 +186,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("speed", () => api.setConfig({ fastMode: fast }))}
                       className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                        on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+                        on ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {label}
@@ -198,16 +198,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="mt-3 space-y-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
               claude
               {runtime?.backendRaw === "claude" && (
-                <span className="ml-2 rounded-full bg-orange-100 px-1.5 py-0.5 font-medium normal-case tracking-normal text-orange-700">
+                <span className="ml-2 rounded-full bg-accent-soft px-1.5 py-0.5 font-medium normal-case tracking-normal text-accent-ink">
                   main agent
                 </span>
               )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-16 shrink-0 text-xs text-slate-500">model</span>
+              <span className="w-16 shrink-0 text-xs text-ink-muted">model</span>
               <select
                 value={claudeOther ||
                     !CLAUDE_MODELS.includes((runtime?.claudeModel ?? "") as typeof CLAUDE_MODELS[number])
@@ -221,10 +221,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   setClaudeOther(false);
                   void wrap("claude model", () => api.setClaudeModel(e.target.value));
                 }}
-                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+                className="flex-1 rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
               >
-                {CLAUDE_MODELS.map((m) => <option key={m} value={m} className="bg-white">{m}</option>)}
-                <option value="other" className="bg-white">other...</option>
+                {CLAUDE_MODELS.map((m) => <option key={m} value={m} className="bg-surface-overlay">{m}</option>)}
+                <option value="other" className="bg-surface-overlay">other...</option>
               </select>
             </div>
             {(claudeOther ||
@@ -242,12 +242,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 onBlur={(e) =>
                   e.target.value.trim() &&
                   void wrap("claude model", () => api.setClaudeModel(e.target.value.trim()))}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm outline-none focus:border-orange-400/50"
+                className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
               />
             )}
             <div className="flex items-center gap-2">
-              <span className="w-16 shrink-0 text-xs text-slate-500">effort</span>
-              <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+              <span className="w-16 shrink-0 text-xs text-ink-muted">effort</span>
+              <div className="flex flex-1 items-center gap-1 rounded-xl border border-line bg-surface-sunken p-1">
                 {CLAUDE_EFFORT.map((t) => {
                   const on = runtime?.claudeEffort === t;
                   return (
@@ -257,7 +257,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("claude effort", () => api.setClaudeEffort(t))}
                       className={`flex-1 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
-                        on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+                        on ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {t}
@@ -266,30 +266,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 })}
               </div>
             </div>
-            <div className="text-[11px] text-slate-400">
+            <div className="text-[11px] text-ink-faint">
               runs your local Claude Code (claude CLI) with its native effort levels
             </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 py-3">
+        <div className="flex items-center justify-between gap-3 border-b border-line py-3">
           <div>
-            <div className="text-sm font-medium text-slate-800">Parallel sub-agents</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-sm font-medium text-ink">Parallel sub-agents</div>
+            <div className="text-xs text-ink-muted">
               Max sub-agents the main agent runs at once. It is told to fan out work up to this many.
             </div>
           </div>
-          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+          <div className="flex items-center gap-1 rounded-xl border border-line bg-surface-sunken p-1">
             <button
               type="button"
               onClick={() =>
                 void wrap("parallel agents", () =>
                   api.setMaxAgents(Math.max(1, (runtime?.maxParallelAgents ?? 5) - 1)))}
-              className="h-7 w-7 rounded-lg text-slate-700 transition hover:bg-slate-100"
+              className="h-7 w-7 rounded-lg text-ink transition hover:bg-surface-sunken"
             >
               −
             </button>
-            <span className="w-7 text-center text-sm font-semibold tabular-nums text-orange-700">
+            <span className="w-7 text-center text-sm font-semibold tabular-nums text-accent-ink">
               {runtime?.maxParallelAgents ?? 5}
             </span>
             <button
@@ -297,17 +297,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               onClick={() =>
                 void wrap("parallel agents", () =>
                   api.setMaxAgents(Math.min(12, (runtime?.maxParallelAgents ?? 5) + 1)))}
-              className="h-7 w-7 rounded-lg text-slate-700 transition hover:bg-slate-100"
+              className="h-7 w-7 rounded-lg text-ink transition hover:bg-surface-sunken"
             >
               +
             </button>
           </div>
         </div>
 
-        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 border-t border-slate-200 pt-3">
+        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 border-t border-line pt-3">
           <div>
-            <div className="text-sm font-medium text-slate-800">Push sub-agent branches</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-sm font-medium text-ink">Push sub-agent branches</div>
+            <div className="text-xs text-ink-muted">
               When a fan-out sub-agent finishes, push its branch to origin (if any); the loop still
               merges everything at the end.
             </div>
@@ -317,11 +317,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             checked={!!runtime?.pushBranches}
             onChange={(e) =>
               void wrap("push branches", () => api.setPushBranches(e.target.checked))}
-            className="h-4 w-4 accent-orange-500"
+            className="h-4 w-4 accent-accent"
           />
         </label>
 
-        <div className="mt-4 text-xs text-slate-500">
+        <div className="mt-4 text-xs text-ink-muted">
           Changes apply to new work immediately. codex uses your Codex login; claude uses Anthropic
           usage; local/pi use your configured local model.
         </div>

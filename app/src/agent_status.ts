@@ -7,16 +7,16 @@ import type { AgentRisk, AgentStatus, ExternalAgentStatus } from "./types";
 type Tone = { label: string; className: string };
 
 const RISK_TONES: Record<Exclude<AgentRisk, "none">, Tone> = {
-  test_failed: { label: "tests failed", className: "border-red-300 bg-red-50 text-red-700" },
-  conflict: { label: "conflict", className: "border-amber-300 bg-amber-50 text-amber-700" },
-  needs_user: { label: "needs you", className: "border-orange-300 bg-orange-50 text-orange-700" },
-  stale: { label: "stale", className: "border-slate-300 bg-slate-50 text-slate-600" },
-  session: { label: "session", className: "border-slate-300 bg-slate-50 text-slate-600" },
+  test_failed: { label: "tests failed", className: "border-danger bg-danger-soft text-danger-ink" },
+  conflict: { label: "conflict", className: "border-warn bg-warn-soft text-warn-ink" },
+  needs_user: { label: "needs you", className: "border-accent bg-accent-soft text-accent-ink" },
+  stale: { label: "stale", className: "border-line-strong bg-surface-sunken text-ink-muted" },
+  session: { label: "session", className: "border-line-strong bg-surface-sunken text-ink-muted" },
 };
 
 const BLOCKED_TONE: Tone = {
   label: "blocked",
-  className: "border-amber-300 bg-amber-50 text-amber-700",
+  className: "border-warn bg-warn-soft text-warn-ink",
 };
 
 // A risk badge for a dispatcher task, or null when there's nothing to flag.

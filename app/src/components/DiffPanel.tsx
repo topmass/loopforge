@@ -118,22 +118,22 @@ export function DiffPanel() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {diff?.truncated && (
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-1.5 text-center text-[11px] text-slate-400">
+        <div className="border-b border-line bg-surface-sunken px-4 py-1.5 text-center text-[11px] text-ink-faint">
           file list truncated
         </div>
       )}
       {diff && !diff.note && files.length > 0 && (
-        <div className="border-b border-slate-200 px-4 py-3 text-xs text-slate-500">
+        <div className="border-b border-line px-4 py-3 text-xs text-ink-muted">
           {files.length} file{files.length === 1 ? "" : "s"}
           {" · "}
-          <span className="font-mono text-emerald-600">+{totalAdd}</span>{" "}
-          <span className="font-mono text-red-600">-{totalDel}</span>
+          <span className="font-mono text-ok">+{totalAdd}</span>{" "}
+          <span className="font-mono text-danger">-{totalDel}</span>
         </div>
       )}
       <div className="flex-1 overflow-y-auto">
-        {error && <div className="px-4 py-3 text-center text-xs text-red-600">{error}</div>}
+        {error && <div className="px-4 py-3 text-center text-xs text-danger">{error}</div>}
         {loading && !diff && (
-          <div className="py-10 text-center text-sm text-slate-400">Loading diff...</div>
+          <div className="py-10 text-center text-sm text-ink-faint">Loading diff...</div>
         )}
         {diff?.note && <EmptyState text={diff.note} />}
         {diff && !diff.note && files.length === 0 && (
@@ -153,37 +153,37 @@ export function DiffPanel() {
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="py-10 text-center text-sm text-slate-500">{text}</div>;
+  return <div className="py-10 text-center text-sm text-ink-muted">{text}</div>;
 }
 
 function FileSection(
   { file, open, onToggle }: { file: GoalDiffFile; open: boolean; onToggle: () => void },
 ) {
   return (
-    <div className="border-b border-slate-100">
+    <div className="border-b border-line">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left transition hover:bg-slate-50"
+        className="flex w-full items-center gap-2 px-4 py-2 text-left transition hover:bg-surface-sunken"
       >
         <span
-          className="min-w-0 flex-1 truncate font-mono text-xs text-slate-700"
+          className="min-w-0 flex-1 truncate font-mono text-xs text-ink"
           title={file.path}
         >
           {truncatePath(file.path)}
         </span>
         {file.binary && (
-          <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-500">
+          <span className="shrink-0 rounded-full border border-line bg-surface-sunken px-1.5 py-0.5 text-[10px] text-ink-muted">
             binary
           </span>
         )}
         {file.truncated && (
-          <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+          <span className="shrink-0 rounded-full border border-warn bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn-ink">
             patch truncated
           </span>
         )}
-        <span className="shrink-0 font-mono text-xs text-emerald-600">+{file.additions}</span>
-        <span className="shrink-0 font-mono text-xs text-red-600">-{file.deletions}</span>
+        <span className="shrink-0 font-mono text-xs text-ok">+{file.additions}</span>
+        <span className="shrink-0 font-mono text-xs text-danger">-{file.deletions}</span>
       </button>
       {open && <PatchBody patch={file.patch} />}
     </div>
@@ -195,24 +195,24 @@ function PatchBody({ patch }: { patch: string }) {
   const shown = lines.slice(0, MAX_PATCH_LINES);
   const extra = lines.length - shown.length;
   return (
-    <div className="overflow-x-auto bg-white pb-2 font-mono text-xs">
+    <div className="overflow-x-auto bg-surface-raised pb-2 font-mono text-xs">
       {shown.map((line, i) => {
         const kind = classifyLine(line);
         if (kind === "meta") return null;
         const cls = kind === "add"
-          ? "bg-emerald-50 text-emerald-900"
+          ? "bg-ok-soft text-ok-ink"
           : kind === "del"
-          ? "bg-red-50 text-red-900"
+          ? "bg-danger-soft text-danger-ink"
           : kind === "hunk"
-          ? "bg-slate-100 text-slate-500"
-          : "text-slate-700";
+          ? "bg-surface-sunken text-ink-muted"
+          : "text-ink";
         return (
           <div key={i} className={`whitespace-pre px-4 ${cls}`}>
             {line || " "}
           </div>
         );
       })}
-      {extra > 0 && <div className="px-4 py-1 text-slate-400">... {extra} more lines</div>}
+      {extra > 0 && <div className="px-4 py-1 text-ink-faint">... {extra} more lines</div>}
     </div>
   );
 }

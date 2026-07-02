@@ -11,7 +11,7 @@ import { GoalStrip } from "./GoalStrip";
 // more than one goal is open (a single open goal needs no disambiguation).
 function GoalChip({ id }: { id: string }) {
   return (
-    <span className="mb-1 inline-block rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+    <span className="mb-1 inline-block rounded-full bg-surface-sunken px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
       {id}
     </span>
   );
@@ -25,9 +25,9 @@ function ActiveWorkersStrip(
 ) {
   if (chips.length === 0) return null;
   return (
-    <div className="border-b border-slate-200 px-4 py-3">
-      <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        Active workers <span className="text-slate-400">{chips.length} running</span>
+    <div className="border-b border-line px-4 py-3">
+      <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
+        Active workers <span className="text-ink-faint">{chips.length} running</span>
       </div>
       <div className="flex flex-wrap gap-2">
         {chips.map((chip) => (
@@ -35,11 +35,11 @@ function ActiveWorkersStrip(
             key={chip.key}
             type="button"
             onClick={() => chip.taskId && onSelect(chip.taskId)}
-            className="flex items-center gap-2 rounded-xl border border-orange-300 bg-orange-50 px-3 py-2 text-left text-sm shadow-sm"
+            className="flex items-center gap-2 rounded-xl border border-accent bg-accent-soft px-3 py-2 text-left text-sm shadow-sm"
           >
-            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-orange-500" />
-            <span className="font-medium text-slate-800">{chip.label}</span>
-            <span className="max-w-[32ch] truncate text-[11px] text-slate-500" title={chip.detail}>
+            <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+            <span className="font-medium text-ink">{chip.label}</span>
+            <span className="max-w-[32ch] truncate text-[11px] text-ink-muted" title={chip.detail}>
               {chip.detail}
             </span>
             {chip.tone
@@ -122,17 +122,17 @@ export function BoardView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <GoalStrip />
       {goalProbes.length > 0 && (
-        <div className="border-b border-slate-200 px-4 py-2 text-xs text-slate-500">
+        <div className="border-b border-line px-4 py-2 text-xs text-ink-muted">
           Win conditions: {passed}/{goalProbes.length} passing
         </div>
       )}
       <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
       {/* Parallel sub-agents as a live strip - lit while coding, calm when merged. */}
       {subagents.length > 0 && (
-        <div className="border-b border-slate-200 px-4 py-3">
-          <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <div className="border-b border-line px-4 py-3">
+          <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
             Sub-agents{" "}
-            <span className="text-slate-400">
+            <span className="text-ink-faint">
               {running > 0 ? `${running} coding in parallel` : `${subagents.length} merged`}
             </span>
           </div>
@@ -152,18 +152,18 @@ export function BoardView() {
                     type="button"
                     onClick={() => selectTask(sa.title)}
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm ${
-                      live ? "border-orange-300 bg-orange-50 shadow-sm" : "border-emerald-300 bg-emerald-50"
+                      live ? "border-accent bg-accent-soft shadow-sm" : "border-ok bg-ok-soft"
                     }`}
                   >
                     <span
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        live ? "animate-pulse bg-orange-500" : "bg-emerald-500"
+                        live ? "animate-pulse bg-accent" : "bg-ok"
                       }`}
                     />
-                    <span className="font-medium text-slate-800">
+                    <span className="font-medium text-ink">
                       {sa.title.replace(/^Spawned sub-agent\s*/i, "")}
                     </span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
                       {live ? "coding" : "merged"}
                     </span>
                   </motion.button>
@@ -176,8 +176,8 @@ export function BoardView() {
       <div className="grid flex-1 grid-cols-3 gap-4 overflow-y-auto p-4">
         {/* To Do */}
         <div className="flex flex-col gap-2.5">
-          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            To do <span className="text-slate-400">{todo.length}</span>
+          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
+            To do <span className="text-ink-faint">{todo.length}</span>
           </div>
           <AnimatePresence initial={false}>
             {todo.map(({ step, goalId }, i) => (
@@ -191,12 +191,12 @@ export function BoardView() {
                 whileHover={{ scale: 1.02, y: -2 }}
                 type="button"
                 onClick={() => selectTask(step.title)}
-                className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left"
+                className="rounded-2xl border border-line bg-surface-sunken p-3 text-left"
               >
                 {showGoalChip && <GoalChip id={goalId} />}
-                <div className="text-sm font-medium text-slate-900">{step.title}</div>
+                <div className="text-sm font-medium text-ink">{step.title}</div>
                 {step.note && (
-                  <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+                  <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-ink-muted">
                     {step.note}
                   </div>
                 )}
@@ -207,8 +207,8 @@ export function BoardView() {
 
         {/* In Progress */}
         <div className="flex flex-col gap-2.5">
-          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            In progress <span className="text-slate-400">{doing.length}</span>
+          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
+            In progress <span className="text-ink-faint">{doing.length}</span>
           </div>
           <AnimatePresence initial={false}>
             {doing.map(({ step, goalId }, i) => (
@@ -222,12 +222,12 @@ export function BoardView() {
                 whileHover={{ scale: 1.02, y: -2 }}
                 type="button"
                 onClick={() => selectTask(step.title)}
-                className="rounded-2xl border border-orange-300 bg-orange-50 p-3 text-left shadow-sm"
+                className="rounded-2xl border border-accent bg-accent-soft p-3 text-left shadow-sm"
               >
                 {showGoalChip && <GoalChip id={goalId} />}
-                <div className="text-sm font-medium text-slate-900">{step.title}</div>
+                <div className="text-sm font-medium text-ink">{step.title}</div>
                 {step.note && (
-                  <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+                  <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-ink-muted">
                     {step.note}
                   </div>
                 )}
@@ -238,17 +238,17 @@ export function BoardView() {
 
         {/* Done: the project's history, grouped by goal (newest goal first). */}
         <div className="flex flex-col gap-2.5">
-          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Done <span className="text-slate-400">{doneCount}</span>
+          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
+            Done <span className="text-ink-faint">{doneCount}</span>
           </div>
           {doneGroups.map((grp) => (
             <div key={grp.goal.id} className="flex flex-col gap-2.5">
-              <div className="flex items-center gap-2 px-1 pt-1 text-[11px] text-slate-500">
-                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+              <div className="flex items-center gap-2 px-1 pt-1 text-[11px] text-ink-muted">
+                <span className="rounded-full bg-surface-sunken px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
                   {grp.goal.id}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{grp.goal.text.slice(0, 40)}</span>
-                <span className="shrink-0 text-slate-400">{grp.done.length} done</span>
+                <span className="shrink-0 text-ink-faint">{grp.done.length} done</span>
               </div>
               <AnimatePresence initial={false}>
                 {grp.done.map((step, i) => (
@@ -262,11 +262,11 @@ export function BoardView() {
                     whileHover={{ scale: 1.02, y: -2 }}
                     type="button"
                     onClick={() => selectTask(step.title)}
-                    className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-left"
+                    className="rounded-2xl border border-ok bg-ok-soft p-3 text-left"
                   >
-                    <div className="text-sm font-medium text-slate-900">{step.title}</div>
+                    <div className="text-sm font-medium text-ink">{step.title}</div>
                     {step.note && (
-                      <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+                      <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-ink-muted">
                         {step.note}
                       </div>
                     )}
@@ -283,9 +283,9 @@ export function BoardView() {
 
 function EmptyState() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-slate-500">
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-ink-muted">
       <div className="text-2xl">Describe a goal to begin</div>
-      <div className="max-w-md text-sm text-slate-500">
+      <div className="max-w-md text-sm text-ink-muted">
         Type what you want built below. LoopForge plans it, runs one agent that owns the goal, and
         shows its plan here live.
       </div>
@@ -306,12 +306,12 @@ function IdlePlan({ goalId }: { goalId: string }) {
   // win conditions. Calm indicator instead of the idle "start the loop" prompt.
   if (planning) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-500">
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-ink-muted">
         <div className="flex items-center gap-2 text-lg">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-orange-500" />
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
           Planning the goal
         </div>
-        <div className="max-w-md text-sm text-slate-500">
+        <div className="max-w-md text-sm text-ink-muted">
           Breaking it into tasks and win conditions...
         </div>
       </div>
@@ -320,12 +320,12 @@ function IdlePlan({ goalId }: { goalId: string }) {
 
   if (working) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-500">
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-ink-muted">
         <div className="flex items-center gap-2 text-lg">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-orange-500" />
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" />
           {goalId}: agent is working
         </div>
-        <div className="max-w-md text-sm text-slate-500">
+        <div className="max-w-md text-sm text-ink-muted">
           The owning agent is planning and acting now. Its plan appears here at the end of the
           current turn. Add a task below any time to steer it.
         </div>
@@ -346,9 +346,9 @@ function IdlePlan({ goalId }: { goalId: string }) {
     }
   };
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-slate-500">
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-ink-muted">
       <div className="text-lg">No plan yet for {goalId}</div>
-      <div className="max-w-md text-sm text-slate-500">
+      <div className="max-w-md text-sm text-ink-muted">
         Start this goal's loop and one agent will own it - planning, working, and verifying - with
         its plan streaming here. Add tasks any time below to steer it.
       </div>
@@ -356,11 +356,11 @@ function IdlePlan({ goalId }: { goalId: string }) {
         type="button"
         onClick={() => void start()}
         disabled={busy}
-        className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-50"
       >
         {busy ? "Starting..." : "Run this goal's loop"}
       </button>
-      {note && <div className="max-w-md text-xs text-slate-500">{note}</div>}
+      {note && <div className="max-w-md text-xs text-ink-muted">{note}</div>}
     </div>
   );
 }
