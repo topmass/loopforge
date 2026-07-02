@@ -3,20 +3,24 @@
 // fan-out agents (ExternalAgentStatus, no taskId). They're normalized into one
 // chip shape so the board shows all live work regardless of which engine ran.
 import type { AgentRisk, AgentStatus, ExternalAgentStatus } from "./types";
+import { STATUS } from "./components/ui";
 
 type Tone = { label: string; className: string };
 
+// Risk badges reuse the shared STATUS vocabulary so a worker's "blocked"/"needs
+// you"/"stale" reads identically to the same state on the board and sidebar.
+// test_failed is the one danger tone STATUS has no key for, so it stays local.
 const RISK_TONES: Record<Exclude<AgentRisk, "none">, Tone> = {
   test_failed: { label: "tests failed", className: "border-danger bg-danger-soft text-danger-ink" },
-  conflict: { label: "conflict", className: "border-warn bg-warn-soft text-warn-ink" },
-  needs_user: { label: "needs you", className: "border-accent bg-accent-soft text-accent-ink" },
-  stale: { label: "stale", className: "border-line-strong bg-surface-sunken text-ink-muted" },
-  session: { label: "session", className: "border-line-strong bg-surface-sunken text-ink-muted" },
+  conflict: { label: "conflict", className: STATUS.blocked.pill },
+  needs_user: { label: "needs you", className: STATUS.live.pill },
+  stale: { label: "stale", className: STATUS.idle.pill },
+  session: { label: "session", className: STATUS.idle.pill },
 };
 
 const BLOCKED_TONE: Tone = {
   label: "blocked",
-  className: "border-warn bg-warn-soft text-warn-ink",
+  className: STATUS.blocked.pill,
 };
 
 // A risk badge for a dispatcher task, or null when there's nothing to flag.

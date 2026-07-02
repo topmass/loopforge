@@ -165,7 +165,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("reasoning", () => api.setConfig({ reasoningEffort: r }))}
                       className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                        on ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
+                        on ? "bg-accent-strong text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {r}
@@ -186,7 +186,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("speed", () => api.setConfig({ fastMode: fast }))}
                       className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                        on ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
+                        on ? "bg-accent-strong text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {label}
@@ -257,7 +257,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("claude effort", () => api.setClaudeEffort(t))}
                       className={`flex-1 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
-                        on ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
+                        on ? "bg-accent-strong text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {t}

@@ -189,7 +189,7 @@ export function FolderPicker(
             type="button"
             onClick={() => void use()}
             disabled={busy || !dir}
-            className="rounded-xl bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-50"
+            className="rounded-xl bg-accent-strong px-3 py-1.5 text-xs font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Adding..." : "Use this folder"}
           </button>

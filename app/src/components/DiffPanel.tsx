@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { api } from "../api";
+import { LineMark } from "./marks";
 import type { GoalDiff, GoalDiffFile } from "../types";
 
 // The Diff tab: per-file unified diffs for the ACTIVE goal's loop branch
@@ -153,7 +154,12 @@ export function DiffPanel() {
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="py-10 text-center text-sm text-ink-muted">{text}</div>;
+  return (
+    <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-ink-muted">
+      <LineMark variant="diff" className="h-12 w-12 text-ink-faint" />
+      {text}
+    </div>
+  );
 }
 
 function FileSection(

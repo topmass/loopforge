@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "../store";
 import { api } from "../api";
 import { useChatSend } from "./ChatBar";
+import { spring } from "./ui";
+import { LineMark } from "./marks";
 import type { Goal, GoalThread, ThreadEntry } from "../types";
 
 // The per-loop Thread view: a T3-style conversation of the ACTIVE goal's loop,
@@ -13,13 +16,14 @@ import type { Goal, GoalThread, ThreadEntry } from "../types";
 const AGENT_COLLAPSE = 1200;
 const NEAR_BOTTOM_PX = 150;
 
-// Four muted left-border tints so parallel fan-out agents read as distinct
-// voices; chosen by a hash of the agent title so a title always gets one tone.
+// Four muted voice tints so parallel fan-out agents read as distinct voices;
+// chosen by a hash of the agent title so a title always gets one tint. Used to
+// fill each fan-out entry's square glyph mark.
 const FANOUT_TINTS = [
-  "border-l-voice-1",
-  "border-l-voice-2",
-  "border-l-voice-3",
-  "border-l-voice-4",
+  "bg-voice-1",
+  "bg-voice-2",
+  "bg-voice-3",
+  "bg-voice-4",
 ];
 
 function hashIndex(s: string, n: number): number {
@@ -161,7 +165,8 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
 
   if (!goal) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-ink-muted">
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-ink-muted">
+        <LineMark variant="thread" className="h-12 w-12 text-ink-faint" />
         <div className="text-lg">Select a loop from the sidebar.</div>
       </div>
     );
@@ -184,7 +189,8 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
             <div className="py-10 text-center text-sm text-ink-faint">Loading thread...</div>
           )}
           {emptyThread && (
-            <div className="py-10 text-center text-sm text-ink-muted">
+            <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-ink-muted">
+              <LineMark variant="thread" className="h-12 w-12 text-ink-faint" />
               No activity yet - the loop has not started.
             </div>
           )}
@@ -192,27 +198,45 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
             {turns.map((turn) => (
               <div key={turn.index} className="flex flex-col gap-3">
                 <TurnSeparator index={turn.index} startedAt={turn.startedAt} />
-                {turn.entries.map((entry) => (
-                  <EntryRow
-                    key={entry.id}
-                    entry={entry}
-                    open={expanded.has(entry.id)}
-                    onToggle={() => toggle(entry.id)}
-                  />
-                ))}
+                {turn.entries.map((entry) => {
+                  // Skip rows render nothing; excluding them here keeps the flex
+                  // gap from opening a phantom slot for an empty motion wrapper.
+                  if (classify(entry) === "skip") return null;
+                  return (
+                    <motion.div
+                      key={entry.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={spring}
+                    >
+                      <EntryRow
+                        entry={entry}
+                        open={expanded.has(entry.id)}
+                        onToggle={() => toggle(entry.id)}
+                      />
+                    </motion.div>
+                  );
+                })}
               </div>
             ))}
           </div>
         </div>
-        {!atBottom && turns.length > 0 && (
-          <button
-            type="button"
-            onClick={jumpToLatest}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-line bg-surface-raised/90 px-3 py-1 text-xs font-medium text-ink-muted shadow-sm backdrop-blur transition hover:text-ink"
-          >
-            jump to latest
-          </button>
-        )}
+        <AnimatePresence>
+          {!atBottom && turns.length > 0 && (
+            <motion.button
+              key="jump"
+              type="button"
+              onClick={jumpToLatest}
+              initial={{ opacity: 0, y: 8, x: "-50%" }}
+              animate={{ opacity: 1, y: 0, x: "-50%" }}
+              exit={{ opacity: 0, y: 8, x: "-50%" }}
+              transition={spring}
+              className="absolute bottom-3 left-1/2 rounded-full border border-line bg-surface-raised/90 px-3 py-1 text-xs font-medium text-ink-muted shadow-sm backdrop-blur transition-colors hover:text-ink"
+            >
+              jump to latest
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
       <ThreadComposer goalId={goal.id} open={open} />
     </div>
@@ -242,11 +266,16 @@ function EntryRow(
       return null;
 
     case "user":
+      // A hollow accent ring marks the human's steer, aligned to the first line.
       return (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
           <div className="max-w-[70%] whitespace-pre-wrap rounded-2xl bg-accent-soft px-4 py-2.5 text-sm text-accent-ink">
             {entry.text}
           </div>
+          <span
+            className="mt-2.5 h-2 w-2 shrink-0 rounded-full border border-accent"
+            aria-hidden="true"
+          />
         </div>
       );
 
@@ -254,7 +283,12 @@ function EntryRow(
       const long = entry.text.length > AGENT_COLLAPSE;
       const shown = long && !open ? entry.text.slice(0, AGENT_COLLAPSE) : entry.text;
       return (
-        <div className="flex justify-start">
+        // A filled accent dot marks the owning agent's prose.
+        <div className="flex justify-start gap-2">
+          <span
+            className="mt-3 h-2 w-2 shrink-0 rounded-full bg-accent"
+            aria-hidden="true"
+          />
           <div className="max-w-[85%] rounded-2xl border border-line bg-surface-raised px-4 py-3 text-sm leading-relaxed text-ink shadow-sm">
             <div className="whitespace-pre-wrap">{shown}{long && !open ? "..." : ""}</div>
             {long && (
@@ -301,18 +335,22 @@ function EntryRow(
       const title = entry.role.slice("fanout:".length);
       const tint = FANOUT_TINTS[hashIndex(title, FANOUT_TINTS.length)];
       return (
+        // A small square in the agent's voice tint marks a fan-out voice.
         <button
           type="button"
           onClick={onToggle}
-          className={`flex w-full flex-col items-start border-l-2 pl-3 text-left ${tint}`}
+          className="flex w-full items-start gap-2 text-left"
         >
-          <span className="w-full truncate text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
-            {title}
-          </span>
-          <span
-            className={`w-full text-xs text-ink-muted ${open ? "whitespace-pre-wrap" : "truncate"}`}
-          >
-            {entry.text}
+          <span className={`mt-1 h-2 w-2 shrink-0 ${tint}`} aria-hidden="true" />
+          <span className="flex min-w-0 flex-1 flex-col items-start">
+            <span className="w-full truncate text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+              {title}
+            </span>
+            <span
+              className={`w-full text-xs text-ink-muted ${open ? "whitespace-pre-wrap" : "truncate"}`}
+            >
+              {entry.text}
+            </span>
           </span>
         </button>
       );
@@ -372,7 +410,7 @@ function ThreadComposer({ goalId, open }: { goalId: string; open: boolean }) {
           type="button"
           onClick={() => void submit()}
           disabled={busy || !open}
-          className="rounded-2xl bg-accent px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
+          className="rounded-2xl bg-accent-strong px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
           Steer
         </button>

@@ -1,6 +1,6 @@
 import { useStore } from "../store";
 import { api } from "../api";
-import { useArmedDelete } from "./ui";
+import { STATUS, useArmedDelete } from "./ui";
 
 // A slim strip of the OPEN goals above the board - clicking one makes it the
 // steering target for the ChatBar and the win-conditions / detail context. Open
@@ -41,7 +41,7 @@ export function GoalStrip() {
           >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                blocked ? "bg-warn" : live ? "animate-pulse bg-accent" : "bg-accent"
+                blocked ? STATUS.blocked.dot : live ? STATUS.live.dot : STATUS.idle.dot
               }`}
             />
             <span className="font-medium text-ink">{g.id}</span>

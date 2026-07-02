@@ -26,6 +26,8 @@
   --color-line-strong: var(--t-line-strong);
 
   --color-accent: var(--t-accent);
+  --color-accent-strong: var(--t-accent-strong);
+  --color-ok-strong: var(--t-ok-strong);
   --color-accent-soft: var(--t-accent-soft);
   --color-accent-ink: var(--t-accent-ink);
   --color-on-accent: var(--t-on-accent);
@@ -76,6 +78,10 @@
   --t-line-strong: #d8d6cf;
 
   --t-accent: #ea580c;
+  /* Deepened accent for solid buttons only, so white on-accent text clears
+     ~4.8:1 in Paper Terminal (plain #ea580c held ~3.6:1). */
+  --t-accent-strong: #c2410c;
+  --t-ok-strong: #047857;
   --t-accent-soft: #ffedd5;
   --t-accent-ink: #9a3412;
   --t-on-accent: #ffffff;
@@ -117,6 +123,9 @@
   --t-line-strong: #3d362b;
 
   --t-accent: #f59e0b;
+  /* Night Ops solids are already dark-text-on-amber, so accent-strong == accent. */
+  --t-accent-strong: #f59e0b;
+  --t-ok-strong: #34d399;
   --t-accent-soft: rgba(245, 158, 11, 0.14);
   --t-accent-ink: #fbbf24;
   --t-on-accent: #17140f;
@@ -210,6 +219,23 @@ body {
   background: color-mix(in srgb, var(--t-surface-raised) 60%, transparent);
   backdrop-filter: blur(10px) saturate(1.05);
   -webkit-backdrop-filter: blur(10px) saturate(1.05);
+}
+
+/* Live status dot: the base dot is drawn by the caller's bg color; this adds a
+   radar ping - a token-colored ring (currentColor, so callers set text-*) that
+   scales out and fades. Applied via STATUS.live.dot (components/ui.ts). */
+.radar-dot { position: relative; }
+.radar-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: currentColor;
+  animation: radar 1.8s ease-out infinite;
+}
+@keyframes radar {
+  0%   { transform: scale(1);   opacity: 0.5; }
+  100% { transform: scale(2.6); opacity: 0; }
 }
 
 *::-webkit-scrollbar { width: 8px; height: 8px; }

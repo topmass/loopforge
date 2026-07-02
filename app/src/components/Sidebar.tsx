@@ -3,7 +3,8 @@ import { AnimatePresence } from "motion/react";
 import { useStore } from "../store";
 import { api } from "../api";
 import type { Goal, ProjectEntry } from "../types";
-import { useArmedDelete } from "./ui";
+import { STATUS, useArmedDelete } from "./ui";
+import { LineMark } from "./marks";
 import { FolderPicker } from "./FolderPicker";
 
 // The project IS the container: the sidebar lists registered projects (repos),
@@ -103,10 +104,10 @@ export function Sidebar() {
   });
   const now = Date.now();
   const loopDot = (g: Goal): string => {
-    if (g.status === "closed") return "bg-ok";
-    if (lastKindByGoal.get(g.id) === "goal.blocked") return "bg-warn";
-    if (now - (loopActiveAt[g.id] ?? 0) < 120_000) return "animate-pulse bg-accent";
-    return "bg-ink-faint";
+    if (g.status === "closed") return STATUS.done.dot;
+    if (lastKindByGoal.get(g.id) === "goal.blocked") return STATUS.blocked.dot;
+    if (now - (loopActiveAt[g.id] ?? 0) < 120_000) return STATUS.live.dot;
+    return STATUS.idle.dot;
   };
   const renderLoopRow = (g: Goal) => {
     const active = g.id === activeGoalId;
@@ -225,7 +226,10 @@ export function Sidebar() {
         </div>
         <div className="space-y-1 px-3 pb-3">
           {goals.length === 0 && (
-            <div className="px-2 py-1 text-sm text-ink-muted">No loops yet.</div>
+            <div className="flex flex-col items-center gap-2 px-2 py-4 text-center text-sm text-ink-muted">
+              <LineMark variant="loops" className="h-8 w-8 text-ink-faint" />
+              No loops yet.
+            </div>
           )}
           {openGoals.map(renderLoopRow)}
           {closedGoals.length > 0 && (
@@ -272,7 +276,7 @@ export function Sidebar() {
             type="button"
             onClick={() => void add()}
             disabled={busy}
-            className="rounded-xl bg-accent px-3 text-xs font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-50"
+            className="rounded-xl bg-accent-strong px-3 text-xs font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "..." : "Add"}
           </button>

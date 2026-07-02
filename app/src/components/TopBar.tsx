@@ -1,4 +1,5 @@
 import { useStore } from "../store";
+import { STATUS } from "./ui";
 
 // The single top strip: brand, the model roles filling each seat, what the loop
 // is doing right now, the Activity tab toggle, connection health, and the
@@ -37,8 +38,22 @@ export function TopBar(
 
   return (
     <header className="glass flex items-center gap-3 border-x-0 border-t-0 border-b border-line px-4 py-2.5">
-      <span className="text-lg font-semibold tracking-tight">
-        Loop<span className="text-accent">Forge</span>
+      <span className="flex items-center gap-1.5 text-lg font-semibold tracking-tight">
+        {/* open cycle glyph - a ring broken by an arrowhead, suggesting a loop */}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-4 w-4 text-accent"
+          aria-hidden="true"
+        >
+          <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+          <path d="M20 4v4h-4" />
+        </svg>
+        <span>Loop<span className="text-accent">Forge</span></span>
       </span>
       <button
         type="button"
@@ -58,7 +73,7 @@ export function TopBar(
       )}
       {now && (
         <span className="ml-2 flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
-          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS.live.dot}`} />
           <span className="truncate">{now.message.slice(0, 90)}</span>
         </span>
       )}

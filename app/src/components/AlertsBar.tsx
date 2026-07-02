@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { api } from "../api";
+import { STATUS } from "./ui";
 
 // Fail-checkin surface: blocked decision briefs and manual-verification holds,
 // the two moments the system needs the human. Each hold offers one-click
@@ -44,13 +45,21 @@ export function AlertsBar() {
     <div className="border-b border-warn bg-warn-soft">
       {blocked.map((e, i) => (
         <div key={`b-${i}`} className="flex items-start gap-2 px-4 py-2 text-sm">
-          <span className="mt-0.5 text-warn-ink">needs you</span>
+          <span
+            className={`mt-px shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${STATUS.blocked.pill}`}
+          >
+            needs you
+          </span>
           <span className="text-warn-ink">{e.summary}</span>
         </div>
       ))}
       {holds.map((t) => (
         <div key={t.id} className="flex items-center gap-3 px-4 py-2 text-sm">
-          <span className="text-warn-ink">verify by hand</span>
+          <span
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${STATUS.held.pill}`}
+          >
+            verify by hand
+          </span>
           <span className="flex-1 truncate text-warn-ink">
             {t.needsInputPrompt?.split("\n")[0] ?? t.title}
           </span>
@@ -58,7 +67,7 @@ export function AlertsBar() {
             type="button"
             onClick={() => void signOff(t.id)}
             disabled={busy === t.id}
-            className="rounded-md bg-ok px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50"
+            className="rounded-md bg-ok-strong px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50"
           >
             {busy === t.id ? "merging..." : "Verify & merge"}
           </button>

@@ -74,7 +74,7 @@ export function ChatBar({ activeGoalId, hasOpenGoal }: { activeGoalId: string | 
           type="button"
           onClick={() => void send()}
           disabled={busy}
-          className="rounded-2xl bg-accent px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
+          className="rounded-2xl bg-accent-strong px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
           {hasOpenGoal ? "Add" : "Start"}
         </button>
