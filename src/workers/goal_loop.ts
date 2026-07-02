@@ -61,7 +61,7 @@ export interface GoalLoopOptions {
 export interface GoalLoopReport {
   goalId: string;
   iterations: number;
-  outcome: "complete" | "merged" | "held" | "blocked" | "budget" | "stalled" | "closed";
+  outcome: "complete" | "merged" | "held" | "blocked" | "budget" | "stalled" | "closed" | "deleted";
   detail: string;
 }
 
@@ -191,6 +191,11 @@ export class GoalLoopRunner {
           : iteration === maxIterations
           ? "iterations"
           : null;
+        // Deleting the goal in the GUI must actually end the loop, not leave
+        // it running headless while holding the single-flow lock.
+        if (!this.store.goalExists(goalId)) {
+          return this.finish(goalId, iteration, "deleted", "Goal was deleted; loop stopped.");
+        }
         // objective-updated: if the goal text changed mid-run, tell the agent.
         const currentObjective = this.store.getGoal(goalId).text;
         const objectiveChanged = currentObjective !== lastObjective;
@@ -222,12 +227,23 @@ export class GoalLoopRunner {
         // Snapshot the plan so the turn end can tell whether the model recorded
         // any task progress alongside its file changes.
         const planBefore = planKey(this.store.listLoopPlanItems(goalId));
+        // Watch for a mid-turn delete and interrupt the streaming turn - a
+        // turn can run for minutes, far too long to wait for the boundary.
+        const deleteWatch = setInterval(() => {
+          if (!this.store.goalExists(goalId)) {
+            clearInterval(deleteWatch);
+            codex.interruptTurn?.(session).catch(() => {});
+          }
+        }, 500);
         try {
           await codex.runTurn(session, {
             title: `${goalId}: loop ${iteration}`,
             prompt,
           });
         } catch (error) {
+          if (!this.store.goalExists(goalId)) {
+            return this.finish(goalId, iteration, "deleted", "Goal was deleted; loop stopped.");
+          }
           const message = error instanceof Error ? error.message : String(error);
           if (isMissingCodexThreadText(message)) {
             // The plan and the repo are the memory; a lost thread is a speed
@@ -238,6 +254,11 @@ export class GoalLoopRunner {
             continue;
           }
           throw error;
+        } finally {
+          clearInterval(deleteWatch);
+        }
+        if (!this.store.goalExists(goalId)) {
+          return this.finish(goalId, iteration, "deleted", "Goal was deleted; loop stopped.");
         }
         // Some backends (Claude Code) only mint their durable session id during
         // the first turn and mutate session.threadId when it arrives - re-persist

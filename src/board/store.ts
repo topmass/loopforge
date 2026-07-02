@@ -425,6 +425,10 @@ export class BoardStore {
     return goalFromRow(row);
   }
 
+  goalExists(id: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM goals WHERE id = ?").get(id));
+  }
+
   closeGoal(
     goalId: string,
     summary = "",

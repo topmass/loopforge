@@ -287,6 +287,41 @@ Deno.test("goal loop nudges once on a stall then stops cleanly", async () => {
   }
 });
 
+Deno.test("goal loop stops with outcome deleted when the goal is removed mid-run", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Doomed mid-run");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 10,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, (_cwd, turn) => {
+          if (turn === 1) {
+            store.addLoopPlanItem(goal.id, "Long slog");
+          }
+          if (turn === 2) {
+            // Simulate the GUI deleting the goal while the loop works.
+            store.deleteGoal(goal.id);
+          }
+          return Promise.resolve("Still working.");
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "deleted");
+    assertEquals(client!.turns, 2);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("goal loop nudges the owner to fan out independent plan items once", async () => {
   const root = Deno.makeTempDirSync();
   await seedRepo(root);
