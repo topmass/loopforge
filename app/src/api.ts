@@ -6,6 +6,7 @@ import type {
   ActivityEvent,
   BoardSnapshot,
   DirEntry,
+  GoalThread,
   LifecycleEvent,
   ProjectEntry,
   Runtime,
@@ -78,6 +79,9 @@ export const api = {
     jsonFetch<{ events: LifecycleEvent[] }>(
       `/api/lifecycle${goalId ? `?goalId=${encodeURIComponent(goalId)}` : ""}`,
     ),
+  // A goal's loop conversation grouped into turns, for the Thread view.
+  getGoalThread: (goalId: string) =>
+    jsonFetch<GoalThread>(`/api/goals/${encodeURIComponent(goalId)}/thread`),
   // Start a fresh goal-loop from plain text (no active goal yet). The goal is
   // created immediately (planning: true) and the plan streams in afterwards.
   startGoalLoop: (text: string, opts?: { hours?: number; questionMode?: boolean }) =>

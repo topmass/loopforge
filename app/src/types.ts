@@ -81,6 +81,32 @@ export interface ActivityEvent {
   kind: string;
   message: string;
   createdAt: string;
+  // Live SSE activity events carry the owning goal (goal_id column); the board
+  // snapshot and lifecycle backlog omit it. The Thread view keys its debounced
+  // live refresh off this.
+  goalId?: string | null;
+}
+
+// The Thread view payload: GET /api/goals/:id/thread. A loop conversation
+// grouped into turns (turn 0 = setup); mirrors the server's ThreadTurn shape.
+export interface ThreadEntry {
+  id: number;
+  at: string;
+  kind: string;
+  role: string;
+  text: string;
+}
+
+export interface ThreadTurn {
+  index: number;
+  startedAt: string | null;
+  entries: ThreadEntry[];
+}
+
+export interface GoalThread {
+  goalId: string;
+  turns: ThreadTurn[];
+  truncated: boolean;
 }
 
 export interface BoardSnapshot {
