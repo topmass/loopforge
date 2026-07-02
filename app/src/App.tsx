@@ -335,6 +335,11 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="mt-3 space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               codex
+              {runtime?.backendRaw === "codex" && (
+                <span className="ml-2 rounded-full bg-orange-100 px-1.5 py-0.5 font-medium normal-case tracking-normal text-orange-700">
+                  main agent
+                </span>
+              )}
             </div>
             <input
               key={runtime?.config?.model ?? ""}
@@ -391,6 +396,11 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="mt-3 space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               claude
+              {runtime?.backendRaw === "claude" && (
+                <span className="ml-2 rounded-full bg-orange-100 px-1.5 py-0.5 font-medium normal-case tracking-normal text-orange-700">
+                  main agent
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span className="w-16 shrink-0 text-xs text-slate-500">model</span>

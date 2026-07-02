@@ -474,6 +474,24 @@ export class BoardStore {
     this.db.prepare(
       "UPDATE runs SET status = 'failed', finished_at = ? WHERE task_id IN (SELECT id FROM tasks WHERE goal_id = ?) AND status = 'running'",
     ).run(timestamp(), goalId);
+    // Delete children explicitly, leaves first. The schema declares ON DELETE
+    // CASCADE, but boards created before those clauses existed keep their
+    // original constraint-free (or cascade-free) tables - CREATE TABLE IF NOT
+    // EXISTS never retrofits them - so relying on cascades either errors or
+    // strands orphans on older DBs.
+    const taskSel = "SELECT id FROM tasks WHERE goal_id = ?";
+    const runSel = `SELECT id FROM runs WHERE task_id IN (${taskSel})`;
+    this.db.prepare(`UPDATE events SET run_id = NULL WHERE run_id IN (${runSel})`).run(goalId);
+    this.db.prepare(`UPDATE events SET task_id = NULL WHERE task_id IN (${taskSel})`).run(goalId);
+    this.db.prepare(`DELETE FROM agent_status WHERE run_id IN (${runSel})`).run(goalId);
+    this.db.prepare(`DELETE FROM runs WHERE task_id IN (${taskSel})`).run(goalId);
+    for (const table of ["file_claims", "messages"]) {
+      this.db.prepare(`DELETE FROM ${table} WHERE task_id IN (${taskSel})`).run(goalId);
+    }
+    this.db.prepare("DELETE FROM tasks WHERE goal_id = ?").run(goalId);
+    for (const table of ["goal_probes", "goal_messages"]) {
+      this.db.prepare(`DELETE FROM ${table} WHERE goal_id = ?`).run(goalId);
+    }
     this.db.prepare("DELETE FROM goals WHERE id = ?").run(goalId);
     return this.appendEvent(
       null,

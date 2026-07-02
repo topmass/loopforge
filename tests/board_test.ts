@@ -712,3 +712,28 @@ Deno.test("task and goal ids never collide after deletions", () => {
     Deno.removeSync(root, { recursive: true });
   }
 });
+
+Deno.test("deleteGoal removes a goal with tasks, runs, probes, and messages", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal, tasks } = store.createGoalWithTasks("Full goal", [
+      { title: "one", description: "d", acceptanceCriteria: "a", priority: 100 },
+      { title: "two", description: "d", acceptanceCriteria: "a", priority: 100 },
+    ], { probes: [{ label: "check", command: "true" }] });
+    store.enqueueGoalMessage(goal.id, "user", "steer text");
+    const run = store.createRun(tasks[0].id, "worker");
+    store.appendEvent(tasks[0].id, run.id, "loop", "note", "child event");
+    const event = store.deleteGoal(goal.id);
+    assertStringIncludes(event.message, goal.id);
+    assertEquals(store.getBoard().goals.length, 0);
+    assertEquals(store.getBoard().tasks.length, 0);
+    assertEquals(store.listProbes(goal.id).length, 0);
+    // Events survive with their task/run refs cleared, so history stays intact.
+    assertEquals(store.getBoard().events.some((e) => e.message === "child event"), true);
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});
