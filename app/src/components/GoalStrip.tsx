@@ -1,0 +1,74 @@
+import { useStore } from "../store";
+import { api } from "../api";
+import { useArmedDelete } from "./ui";
+
+// A slim strip of the OPEN goals above the board - clicking one makes it the
+// steering target for the ChatBar and the win-conditions / detail context. Open
+// goals only; closed goals live in the board's Done column instead.
+export function GoalStrip() {
+  const board = useStore((s) => s.board);
+  const activeGoalId = useStore((s) => s.activeGoalId);
+  const setActiveGoal = useStore((s) => s.setActiveGoal);
+  const loopActiveAt = useStore((s) => s.loopActiveAt);
+  const { armed, arm, disarm } = useArmedDelete();
+  const open = (board?.goals ?? []).filter((g) => g.status === "open");
+  const tasks = board?.tasks ?? [];
+  if (open.length === 0) return null;
+  const now = Date.now();
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-2.5">
+      {open.map((g) => {
+        const live = now - (loopActiveAt[g.id] ?? 0) < 90_000;
+        const blocked = tasks.some((t) => t.goalId === g.id && t.status === "blocked");
+        const active = g.id === activeGoalId;
+        const isArmed = armed === g.id;
+        const words = g.text.split(/\s+/).slice(0, 5).join(" ");
+        return (
+          <button
+            key={g.id}
+            type="button"
+            onClick={() => setActiveGoal(g.id)}
+            onMouseLeave={() => {
+              if (armed === g.id) disarm();
+            }}
+            className={`group flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
+              isArmed
+                ? "border-red-300 bg-red-50"
+                : active
+                ? "border-orange-300 bg-orange-50 shadow-sm"
+                : "border-slate-200 bg-white hover:border-slate-300"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                blocked ? "bg-amber-500" : live ? "animate-pulse bg-orange-500" : "bg-orange-500"
+              }`}
+            />
+            <span className="font-medium text-slate-700">{g.id}</span>
+            <span className="max-w-[22ch] truncate text-slate-500">{words}</span>
+            {/* x arms; a second click within 4s removes. stopPropagation so the
+                chip's select-on-click never fires from the x. */}
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isArmed) {
+                  disarm();
+                  void api.deleteGoal(g.id);
+                } else {
+                  arm(g.id);
+                }
+              }}
+              className={isArmed
+                ? "shrink-0 font-semibold text-red-600"
+                : "shrink-0 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"}
+            >
+              {isArmed ? "remove?" : "×"}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
