@@ -380,7 +380,7 @@ export class CodexAppServerClient implements CodexClient {
   }
 
   private emit(role: string, kind: string, message: string, raw: unknown): void {
-    if (!message.trim()) {
+    if (!message.length) {
       return;
     }
     this.onEvent({

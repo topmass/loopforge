@@ -5,6 +5,7 @@ import {
   CodexAppServerClient,
   isCrashLooping,
 } from "../src/workers/codex_app_server.ts";
+import { parsePlannerPlanResponse } from "../src/workers/goal_planner.ts";
 
 const SETTINGS = { model: "m", reasoningEffort: "high", fastMode: true } as const;
 
@@ -132,6 +133,53 @@ Deno.test("a healthy bridge resolves a request from its response", async () => {
   const session = client.startSession("/tmp");
   bridges[0].emit(JSON.stringify({ id: 1, result: { threadId: "thread-1" } }));
   assertEquals((await session).threadId, "thread-1");
+
+  await client.stop();
+});
+
+Deno.test("planner agent deltas preserve whitespace-only chunks before digits", async () => {
+  const bridges: FakeBridge[] = [];
+  const events: string[] = [];
+  const spawn: BridgeSpawn = () => {
+    const bridge = new FakeBridge();
+    bridges.push(bridge);
+    return bridge;
+  };
+  const client = new CodexAppServerClient((event) => {
+    if (event.role === "codex" && event.kind === "agent") {
+      events.push(event.message);
+    }
+  }, SETTINGS, spawn);
+
+  const session = client.startSession("/tmp");
+  bridges[0].emit(JSON.stringify({ id: 1, result: { threadId: "thread-1" } }));
+  const turn = client.runTurn(await session, { title: "plan", prompt: "plan" });
+  for (const message of [
+    '{"completionContract":"- done","probes":[{"label":"server","command":"python -m http.server',
+    " ",
+    '4173 --bind',
+    " ",
+    '127.0.0.1"}],"tasks":[{"title":"Serve","prompt":"Serve it.","acceptanceCriteria":"- It serves.","priority":100,"workpad":"Independent.","dependsOn":[],"riskLevel":"low","verificationPlan":"- Curl it."}]}',
+  ]) {
+    bridges[0].emit(JSON.stringify({
+      event: {
+        role: "codex",
+        kind: "agent",
+        message,
+        raw: { method: "item/agentMessage/delta" },
+      },
+    }));
+  }
+  bridges[0].emit(JSON.stringify({
+    id: 2,
+    result: { threadId: "thread-1", turnId: "turn-1", status: "completed", completed: true },
+  }));
+
+  await turn;
+  assertEquals(
+    parsePlannerPlanResponse(events.join("")).probes[0].command,
+    "python -m http.server 4173 --bind 127.0.0.1",
+  );
 
   await client.stop();
 });
