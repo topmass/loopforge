@@ -10,9 +10,9 @@ Last checked: 2026-06-15.
 - Local repo path is still `/home/topmass/Code/goalforge`.
 - Git remote is `https://github.com/topmass/loopforge.git`.
 - `./loopforge` is the primary launcher. `./goalforge` remains a compatibility alias.
-- Git HEAD and `origin/main` are synced at `ca60ccb`; the current working tree may contain
+- Git HEAD and `origin/main` are synced at `fa5cc42`; the current working tree may contain
   in-progress specsheet edits.
-- `deno task test` passed on 2026-06-15 with 189 tests.
+- `deno task test` passed on 2026-07-02 with 287 tests.
 - `pnpm run smoke:opentui` currently fails in older mouse-coordinate phases, while the scroll,
   review, and dogfood phases pass. Treat the OpenTUI smoke harness as needing maintenance after
   recent layout changes.
@@ -339,9 +339,25 @@ Default worker backend is Codex through the Python SDK bridge over local Codex a
 Backends:
 
 - `--codex`
-- `--pi`
 - `--claude`
-- `--local --endpoint URL --agent-model MODEL`
+- `--local --endpoint URL --agent-model MODEL` (the local backend IS the pi coding agent; `--pi`
+  survives as a legacy alias and configs migrate `pi` to `local` in `readGlobalConfig`)
+
+Local backend, validated end-to-end 2026-07-02 against a remote llama.cpp server (`qwen3-6-27b`,
+2 slots, RTX 5090):
+
+- `ensureLocalPiProvider` (`src/board/global_config.ts`) writes a `loopforge-local` provider into
+  `~/.pi/agent/models.json` from `local.endpoint`/`local.model`; `PiRpcClient` drives the pi
+  binary with `--provider loopforge-local`.
+- Parallel fan-out is proven: one goal spawned two sub-agents in the same second, each on its own
+  llama.cpp slot, merged 65s later. Slot count comes from the model server (`-np N`), concurrency
+  from `maxParallelAgents`.
+- Known trap: MTP fork builds collapse at 2+ concurrent slots (`single-token chunking` fallback
+  makes prefill so slow pi times out and turns come back empty). Serve plain non-MTP GGUFs for
+  multi-agent work.
+- Known trap: small local models write subtly broken shell quoting into planner probes. Failing
+  probes are repairable in `goal_probes` while the loop runs; a probe-edit GUI affordance is the
+  planned fix.
 
 Planner routing:
 
@@ -415,5 +431,11 @@ Recommended cleanup:
   `src/tui/opentui_client.ts` is exercised mainly through smoke tests rather than `deno check`.
 - Do not mutate `.loopforge/board.sqlite` directly in normal work. Use `BoardStore`, CLI commands,
   or server APIs.
+- Never filter streamed agent text deltas with `trim()` in bridge emit paths - whitespace-only
+  deltas are real content (codex splits the space before numbers into its own delta). Filter on
+  `length` only. See `CodexAppServerClient.emit()` and its regression test.
+- Any store read polled from a worker timer must tolerate deleted rows: an uncaught throw inside
+  `setTimeout` kills the whole server process. Precedent: `isRunStopRequested()` reports a
+  missing run as stop-requested.
 - Do not create extra markdown docs unless explicitly requested. Keep this specsheet as the
   repo-local source of truth.
