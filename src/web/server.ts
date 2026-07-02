@@ -7,7 +7,7 @@ import {
   updateConfig,
 } from "../board/store.ts";
 import { ActivityEvent, ActivityEventInput, TaskStatus } from "../board/types.ts";
-import { normalizeRoot, staticPath } from "../paths.ts";
+import { normalizeRoot } from "../paths.ts";
 import {
   CLAUDE_EFFORT_LEVELS,
   describeBackend,
@@ -1587,7 +1587,11 @@ export function startServer(
           return await serveApp(url.pathname);
         }
 
-        return await serveStatic(url.pathname);
+        // The legacy server-rendered GUI is gone; the React app is the GUI.
+        if (url.pathname === "/") {
+          return new Response(null, { status: 302, headers: { location: "/app/" } });
+        }
+        return new Response("Not found", { status: 404 });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: message }, 500);
@@ -1653,27 +1657,6 @@ async function serveApp(pathname: string): Promise<Response> {
         { status: 503 },
       );
     }
-  }
-}
-
-async function serveStatic(pathname: string): Promise<Response> {
-  const file = pathname === "/" ? "index.html" : pathname.slice(1);
-  const target = path.normalize(staticPath(APP_ROOT, file));
-  const staticRoot = path.normalize(staticPath(APP_ROOT));
-  if (!target.startsWith(staticRoot)) {
-    return new Response("Not found", { status: 404 });
-  }
-
-  try {
-    const content = await Deno.readFile(target);
-    return new Response(content, {
-      headers: {
-        "content-type": contentType(target),
-        "cache-control": "no-store",
-      },
-    });
-  } catch {
-    return new Response("Not found", { status: 404 });
   }
 }
 

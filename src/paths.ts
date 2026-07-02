@@ -63,10 +63,6 @@ export function taskArtifactsPath(root: string, ...parts: string[]): string {
   return runtimePath(root, "tasks", ...parts);
 }
 
-export function staticPath(root: string, ...parts: string[]): string {
-  return path.join(root, "static", ...parts);
-}
-
 export function normalizeRoot(root = Deno.cwd()): string {
   return path.resolve(root);
 }

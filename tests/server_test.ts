@@ -19,8 +19,10 @@ Deno.test("server exposes board, creates goals, and runs Codex worker", async ()
     createCodexClient: (onEvent) => new TestCodexClient(onEvent),
   });
   try {
-    const html = await fetch(`${server.url}/`).then((response) => response.text());
-    assertStringIncludes(html, "LoopForge");
+    const rootResponse = await fetch(`${server.url}/`, { redirect: "manual" });
+    await rootResponse.body?.cancel();
+    assertEquals(rootResponse.status, 302);
+    assertEquals(rootResponse.headers.get("location"), "/app/");
 
     const configResponse = await fetch(`${server.url}/api/config`, {
       method: "PATCH",
