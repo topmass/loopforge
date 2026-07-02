@@ -106,12 +106,22 @@ function AlertsBar() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const holds = (board?.tasks ?? []).filter((t) => t.currentGate === "manual-verification");
-  // Latest blocked event per goal that has not since closed.
   const closedGoals = new Set(
     (board?.goals ?? []).filter((g) => g.status === "closed").map((g) => g.id),
   );
-  const blocked = lifecycle
-    .filter((e) => e.kind === "goal.blocked" && e.goalId && !closedGoals.has(e.goalId))
+  // A blocked brief is live only while it is the goal's LATEST lifecycle
+  // signal - any later event (the steer answer's task.added, plan.updated from
+  // resumed work) means the loop moved on and the ask is stale.
+  const lastEventIdx = new Map<string, number>();
+  const lastBlockedIdx = new Map<string, number>();
+  lifecycle.forEach((e, i) => {
+    if (!e.goalId) return;
+    lastEventIdx.set(e.goalId, i);
+    if (e.kind === "goal.blocked") lastBlockedIdx.set(e.goalId, i);
+  });
+  const blocked = [...lastBlockedIdx.entries()]
+    .filter(([goalId, i]) => !closedGoals.has(goalId) && lastEventIdx.get(goalId) === i)
+    .map(([, i]) => lifecycle[i])
     .slice(-3);
 
   if (!holds.length && !blocked.length) return null;
