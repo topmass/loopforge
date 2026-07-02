@@ -107,6 +107,12 @@ export class BoardStore {
     this.db = new DatabaseSync(databasePath(this.root));
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA foreign_keys = ON;");
+    // Multiple processes write this DB concurrently (the server, the lf-task
+    // CLI running inside a model's turn, sibling project servers). Without a
+    // busy timeout a contended write throws SQLITE_BUSY immediately - which
+    // once killed a live server mid-goal. Waiting a few seconds absorbs the
+    // ms-scale write bursts instead.
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.ensureSchema();
   }
 

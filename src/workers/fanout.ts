@@ -206,7 +206,13 @@ export class FanoutRunner {
           }
           const activity = { ...event, role: `fanout:${sub.title}` };
           if (shouldRecordActivity(activity)) {
-            this.emit(this.store.appendAgentEvent(activity, goalId));
+            // Fires from the sub-agent's stream reader - a transient DB error
+            // here must cost one activity line, not the process.
+            try {
+              this.emit(this.store.appendAgentEvent(activity, goalId));
+            } catch (error) {
+              console.error(`fanout activity append failed for ${goalId}:`, error);
+            }
           }
         });
         try {

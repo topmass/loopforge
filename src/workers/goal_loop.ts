@@ -161,7 +161,14 @@ export class GoalLoopRunner {
       }
       const activity = { ...event, taskId: event.taskId ?? null, runId: event.runId ?? null };
       if (shouldRecordActivity(activity)) {
-        this.emit(this.store.appendAgentEvent({ ...activity, role: "loop" }, goalId));
+        // This callback fires from the backend's stdout reader, outside the
+        // loop's try/catch - a throw here (e.g. a transient SQLITE_BUSY) once
+        // killed the whole server. Losing one activity line beats dying.
+        try {
+          this.emit(this.store.appendAgentEvent({ ...activity, role: "loop" }, goalId));
+        } catch (error) {
+          console.error(`activity append failed for ${goalId}:`, error);
+        }
       }
     });
 
