@@ -203,9 +203,9 @@ function StatusStrip({ onSettings }: { onSettings: () => void }) {
 const BACKENDS = ["codex", "claude", "local", "pi"] as const;
 // The real ReasoningEffort union from src/board/store.ts - keep in sync.
 const REASONING = ["low", "medium", "high", "xhigh"] as const;
-// Claude's thinking ladder via pi --thinking (see CLAUDE_THINKING_LEVELS in
-// src/board/global_config.ts). Distinct from codex's reasoning effort.
-const CLAUDE_THINKING = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+// The native Claude Code CLI's --effort ladder (see CLAUDE_EFFORT_LEVELS in
+// src/board/global_config.ts).
+const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"] as const;
 // Common Claude models offered in the picker; "other..." reveals a free-text box.
 const CLAUDE_MODELS = [
   "claude-sonnet-5",
@@ -442,16 +442,16 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               />
             )}
             <div className="flex items-center gap-2">
-              <span className="w-16 shrink-0 text-xs text-slate-500">thinking</span>
+              <span className="w-16 shrink-0 text-xs text-slate-500">effort</span>
               <div className="flex flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-                {CLAUDE_THINKING.map((t) => {
-                  const on = runtime?.claudeThinking === t;
+                {CLAUDE_EFFORT.map((t) => {
+                  const on = runtime?.claudeEffort === t;
                   return (
                     <button
                       key={t}
                       type="button"
                       onClick={() =>
-                        void wrap("claude thinking", () => api.setClaudeThinking(t))}
+                        void wrap("claude effort", () => api.setClaudeEffort(t))}
                       className={`flex-1 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
                         on ? "bg-orange-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
                       }`}
@@ -463,7 +463,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="text-[11px] text-slate-400">
-              thinking maps to Claude reasoning effort via pi; fast mode is codex-only for now
+              runs your local Claude Code (claude CLI) with its native effort levels
             </div>
           </div>
         </div>

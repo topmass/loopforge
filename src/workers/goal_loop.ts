@@ -232,6 +232,12 @@ export class GoalLoopRunner {
           }
           throw error;
         }
+        // Some backends (Claude Code) only mint their durable session id during
+        // the first turn and mutate session.threadId when it arrives - re-persist
+        // so a later resume carries a real id, not the placeholder saved at open.
+        if (session.threadId !== this.store.getGoal(goalId).loopThreadId) {
+          this.store.setGoalLoopState(goalId, { threadId: session.threadId });
+        }
         // Clarify turn: surface the agent's questions and stop. Answering in
         // chat re-runs the loop with the answers queued, so it plans next time.
         if (doClarify) {

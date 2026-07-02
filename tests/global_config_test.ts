@@ -42,27 +42,29 @@ Deno.test("updateGlobalConfig clamps the parallel-agent cap to 1-12 and persists
   });
 });
 
-Deno.test("claude thinking defaults to high, round-trips, and normalizes invalid values", () => {
+Deno.test("claude effort defaults to high, round-trips, and normalizes invalid values", () => {
   withTempHome(() => {
-    assertEquals(defaultGlobalConfig().claude.thinking, "high");
-    assertEquals(readGlobalConfig().claude.thinking, "high");
+    assertEquals(defaultGlobalConfig().claude.effort, "high");
+    assertEquals(readGlobalConfig().claude.effort, "high");
 
     // A valid patch round-trips through persistence.
-    assertEquals(updateGlobalConfig({ claude: { thinking: "xhigh" } }).claude.thinking, "xhigh");
-    assertEquals(readGlobalConfig().claude.thinking, "xhigh");
+    assertEquals(updateGlobalConfig({ claude: { effort: "xhigh" } }).claude.effort, "xhigh");
+    assertEquals(readGlobalConfig().claude.effort, "xhigh");
+    // "max" is a real CLI level.
+    assertEquals(updateGlobalConfig({ claude: { effort: "max" } }).claude.effort, "max");
 
     // An invalid patched value normalizes back to the default instead of persisting.
-    assertEquals(updateGlobalConfig({ claude: { thinking: "turbo" } }).claude.thinking, "high");
-    assertEquals(readGlobalConfig().claude.thinking, "high");
-    // A thinking-only patch leaves the model untouched.
+    assertEquals(updateGlobalConfig({ claude: { effort: "turbo" } }).claude.effort, "high");
+    assertEquals(readGlobalConfig().claude.effort, "high");
+    // An effort-only patch leaves the model untouched.
     assertEquals(readGlobalConfig().claude.model, defaultGlobalConfig().claude.model);
 
     // A malformed value on disk also normalizes to the default on read.
     Deno.writeTextFileSync(
       globalConfigPath(),
-      JSON.stringify({ claude: { model: "claude-x", thinking: "bogus" } }),
+      JSON.stringify({ claude: { model: "claude-x", effort: "bogus" } }),
     );
-    assertEquals(readGlobalConfig().claude.thinking, "high");
+    assertEquals(readGlobalConfig().claude.effort, "high");
     assertEquals(readGlobalConfig().claude.model, "claude-x");
   });
 });

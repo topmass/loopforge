@@ -1,13 +1,14 @@
 // Resolves which agent backend runs LoopForge workers and builds clients for
-// it. Codex stays the native default; pi (pi.dev) provides every other model:
-// claude = pi with the Anthropic provider, local = pi with a LoopForge-managed
-// custom provider pointed at any OpenAI-compatible endpoint (llama.cpp, vLLM,
-// LM Studio, Ollama).
+// it. Codex stays the native default; claude drives the native Claude Code CLI
+// directly; pi (pi.dev) provides local models: local = pi with a
+// LoopForge-managed custom provider pointed at any OpenAI-compatible endpoint
+// (llama.cpp, vLLM, LM Studio, Ollama).
 
 import path from "node:path";
 import { GlobalConfig, readGlobalConfig } from "../board/global_config.ts";
 import { readConfig } from "../board/store.ts";
 import { ActivityEventInput } from "../board/types.ts";
+import { ClaudeCodeClient } from "./claude_code_client.ts";
 import { CodexAppServerClient, CodexClient } from "./codex_app_server.ts";
 import { PiRpcClient } from "./pi_rpc_client.ts";
 
@@ -25,10 +26,9 @@ export function createAgentClient(
     });
   }
   if (config.backend === "claude") {
-    return new PiRpcClient(onEvent, {
-      provider: "anthropic",
+    return new ClaudeCodeClient(onEvent, {
       model: config.claude.model,
-      thinking: config.claude.thinking,
+      effort: config.claude.effort,
     });
   }
   if (config.backend === "local") {

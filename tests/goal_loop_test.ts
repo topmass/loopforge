@@ -834,3 +834,42 @@ Deno.test("a new goal never inherits a previous goal's LOOP_PLAN.md", async () =
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("goal loop re-persists a session id minted during the first turn", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Late session id");
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        // Blocked outcome keeps the goal open with loop state intact, so the
+        // persisted thread id is observable after the run (a merged close
+        // clears loop state during reclaim).
+        const client = new ScriptedLoopClient(
+          onEvent,
+          () => Promise.resolve("LOOP_BLOCKED: which flavor?"),
+        );
+        // Claude Code style: startSession hands out a placeholder and the real
+        // id only appears while the first turn runs.
+        client.startSession = (cwd: string) => Promise.resolve({ threadId: "claude-pending", cwd });
+        const originalRunTurn = client.runTurn.bind(client);
+        client.runTurn = (session, input) => {
+          session.threadId = "real-session-id";
+          return originalRunTurn(session, input);
+        };
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "blocked");
+    // The durable id minted mid-turn was written back over the placeholder.
+    assertEquals(store.getGoal(goal.id).loopThreadId, "real-session-id");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});

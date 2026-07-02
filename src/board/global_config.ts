@@ -9,18 +9,17 @@ export const AGENT_BACKENDS = ["codex", "pi", "claude", "local"] as const;
 
 export type AgentBackend = typeof AGENT_BACKENDS[number];
 
-// Claude runs through pi, whose CLI exposes `--thinking <level>` with its own
-// ladder (distinct from codex's reasoning effort). Verified against `pi --help`.
-export const CLAUDE_THINKING_LEVELS = [
-  "off",
-  "minimal",
+// Claude runs the native Claude Code CLI, whose `--effort <level>` ladder these
+// mirror. Verified against `claude --help`.
+export const CLAUDE_EFFORT_LEVELS = [
   "low",
   "medium",
   "high",
   "xhigh",
+  "max",
 ] as const;
 
-export type ClaudeThinking = typeof CLAUDE_THINKING_LEVELS[number];
+export type ClaudeEffort = typeof CLAUDE_EFFORT_LEVELS[number];
 
 export interface GlobalConfig {
   backend: AgentBackend;
@@ -35,7 +34,7 @@ export interface GlobalConfig {
   };
   claude: {
     model: string;
-    thinking: string;
+    effort: string;
   };
   rescue: {
     enabled: boolean;
@@ -120,7 +119,7 @@ export function defaultGlobalConfig(): GlobalConfig {
     },
     claude: {
       model: "claude-sonnet-4-6",
-      thinking: "high",
+      effort: "high",
     },
     rescue: {
       enabled: false,
@@ -168,7 +167,7 @@ export function readGlobalConfig(): GlobalConfig {
     },
     claude: {
       model: stringValue(record(parsed.claude).model, defaults.claude.model),
-      thinking: normalizeClaudeThinking(record(parsed.claude).thinking, defaults.claude.thinking),
+      effort: normalizeClaudeEffort(record(parsed.claude).effort, defaults.claude.effort),
     },
     rescue: {
       enabled: record(parsed.rescue).enabled === true,
@@ -210,9 +209,9 @@ function clampAgents(value: number): number {
 
 export function updateGlobalConfig(patch: GlobalConfigPatch): GlobalConfig {
   const current = readGlobalConfig();
-  // Re-normalize the patched thinking level so an invalid value can't be persisted.
+  // Re-normalize the patched effort level so an invalid value can't be persisted.
   const claude = { ...current.claude, ...patch.claude };
-  claude.thinking = normalizeClaudeThinking(claude.thinking, defaultGlobalConfig().claude.thinking);
+  claude.effort = normalizeClaudeEffort(claude.effort, defaultGlobalConfig().claude.effort);
   const next: GlobalConfig = {
     backend: patch.backend ?? current.backend,
     local: { ...current.local, ...patch.local },
@@ -236,7 +235,7 @@ export function describeBackend(config: GlobalConfig): string {
     return "codex (native Codex app-server)";
   }
   if (config.backend === "claude") {
-    return `claude via pi (${config.claude.model})`;
+    return `claude (${config.claude.model})`;
   }
   if (config.backend === "local") {
     return `local via pi (${config.local.model} at ${config.local.endpoint})`;
@@ -249,8 +248,8 @@ export function normalizeBackend(value: unknown, fallback: AgentBackend): AgentB
   return AGENT_BACKENDS.includes(value as AgentBackend) ? value as AgentBackend : fallback;
 }
 
-export function normalizeClaudeThinking(value: unknown, fallback: string): string {
-  return CLAUDE_THINKING_LEVELS.includes(value as ClaudeThinking) ? value as string : fallback;
+export function normalizeClaudeEffort(value: unknown, fallback: string): string {
+  return CLAUDE_EFFORT_LEVELS.includes(value as ClaudeEffort) ? value as string : fallback;
 }
 
 function record(value: unknown): Record<string, unknown> {

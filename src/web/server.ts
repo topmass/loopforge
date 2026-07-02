@@ -9,7 +9,7 @@ import {
 import { ActivityEvent, ActivityEventInput, TaskStatus } from "../board/types.ts";
 import { normalizeRoot, staticPath } from "../paths.ts";
 import {
-  CLAUDE_THINKING_LEVELS,
+  CLAUDE_EFFORT_LEVELS,
   describeBackend,
   normalizeBackend,
   readGlobalConfig,
@@ -465,7 +465,7 @@ export function startServer(
             backend: describeBackend(readGlobalConfig()),
             backendRaw: readGlobalConfig().backend,
             claudeModel: readGlobalConfig().claude.model,
-            claudeThinking: readGlobalConfig().claude.thinking,
+            claudeEffort: readGlobalConfig().claude.effort,
             rescue: readGlobalConfig().rescue,
             planner: readGlobalConfig().planner,
             scout: readGlobalConfig().scout,
@@ -612,34 +612,34 @@ export function startServer(
         // backends surface the settings modal edits.
         if (url.pathname === "/api/backend" && request.method === "PATCH") {
           const body = await readJson<
-            { backend?: string; claudeModel?: string; claudeThinking?: string }
+            { backend?: string; claudeModel?: string; claudeEffort?: string }
           >(request);
           const hasBackend = typeof body.backend === "string" && body.backend.trim().length > 0;
           const hasClaudeModel = typeof body.claudeModel === "string" &&
             body.claudeModel.trim().length > 0;
-          const hasClaudeThinking = typeof body.claudeThinking === "string" &&
-            body.claudeThinking.trim().length > 0;
-          if (!hasBackend && !hasClaudeModel && !hasClaudeThinking) {
-            return json({ error: "backend, claudeModel, or claudeThinking is required." }, 400);
+          const hasClaudeEffort = typeof body.claudeEffort === "string" &&
+            body.claudeEffort.trim().length > 0;
+          if (!hasBackend && !hasClaudeModel && !hasClaudeEffort) {
+            return json({ error: "backend, claudeModel, or claudeEffort is required." }, 400);
           }
           if (
-            hasClaudeThinking &&
-            !CLAUDE_THINKING_LEVELS.includes(
-              body.claudeThinking!.trim() as typeof CLAUDE_THINKING_LEVELS[number],
+            hasClaudeEffort &&
+            !CLAUDE_EFFORT_LEVELS.includes(
+              body.claudeEffort!.trim() as typeof CLAUDE_EFFORT_LEVELS[number],
             )
           ) {
             return json(
-              { error: `claudeThinking must be one of: ${CLAUDE_THINKING_LEVELS.join(", ")}.` },
+              { error: `claudeEffort must be one of: ${CLAUDE_EFFORT_LEVELS.join(", ")}.` },
               400,
             );
           }
           const updated = updateGlobalConfig({
             ...(hasBackend ? { backend: normalizeBackend(body.backend!.trim(), "codex") } : {}),
-            ...(hasClaudeModel || hasClaudeThinking
+            ...(hasClaudeModel || hasClaudeEffort
               ? {
                 claude: {
                   ...(hasClaudeModel ? { model: body.claudeModel!.trim() } : {}),
-                  ...(hasClaudeThinking ? { thinking: body.claudeThinking!.trim() } : {}),
+                  ...(hasClaudeEffort ? { effort: body.claudeEffort!.trim() } : {}),
                 },
               }
               : {}),
@@ -654,14 +654,14 @@ export function startServer(
                 ? `Main backend set to ${updated.backend}.`
                 : hasClaudeModel
                 ? `Claude model set to ${updated.claude.model}.`
-                : `Claude thinking set to ${updated.claude.thinking}.`,
+                : `Claude effort set to ${updated.claude.effort}.`,
             ),
           );
           return json({
             backend: describeBackend(updated),
             raw: updated.backend,
             claudeModel: updated.claude.model,
-            claudeThinking: updated.claude.thinking,
+            claudeEffort: updated.claude.effort,
           });
         }
 

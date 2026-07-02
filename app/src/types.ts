@@ -143,7 +143,7 @@ export interface Runtime {
   // so the settings modal can seed its "Model power" controls.
   config?: { model: string; reasoningEffort: string; fastMode: boolean };
   claudeModel?: string;
-  claudeThinking?: string;
+  claudeEffort?: string;
   activeAgentStatuses?: AgentStatus[];
   externalAgents?: ExternalAgentStatus[];
 }

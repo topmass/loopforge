@@ -143,11 +143,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ claudeModel: model }),
     }),
-  // Machine-wide Claude thinking level (pi --thinking), same backends endpoint.
-  setClaudeThinking: (thinking: string) =>
-    jsonFetch<{ claudeThinking: string }>("/api/backend", {
+  // Machine-wide Claude Code effort level (claude --effort), same backends endpoint.
+  setClaudeEffort: (effort: string) =>
+    jsonFetch<{ claudeEffort: string }>("/api/backend", {
       method: "PATCH",
-      body: JSON.stringify({ claudeThinking: thinking }),
+      body: JSON.stringify({ claudeEffort: effort }),
     }),
   // Create a new folder inside `path` (the picker's current dir); returns the
   // created absolute path so the picker can navigate straight into it.

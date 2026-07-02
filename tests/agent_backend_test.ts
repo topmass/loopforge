@@ -12,8 +12,9 @@ import {
   ensureLocalPiProvider,
   LOCAL_PI_PROVIDER_ID,
 } from "../src/workers/agent_backend.ts";
+import { ClaudeCodeClient, ClaudeCodeSettings } from "../src/workers/claude_code_client.ts";
 import { CodexAppServerClient } from "../src/workers/codex_app_server.ts";
-import { PiRpcClient, PiRpcClientOptions } from "../src/workers/pi_rpc_client.ts";
+import { PiRpcClient } from "../src/workers/pi_rpc_client.ts";
 
 function withTempHome(fn: () => void): void {
   const home = Deno.makeTempDirSync();
@@ -76,17 +77,16 @@ Deno.test("agent client factory selects the configured backend", () => {
   });
 });
 
-Deno.test("claude backend threads the configured thinking level into the pi client", () => {
+Deno.test("claude backend builds a native Claude Code client with the configured model and effort", () => {
   withTempHome(() => {
     const root = Deno.makeTempDirSync();
     try {
-      updateGlobalConfig({ backend: "claude", claude: { thinking: "low" } });
+      updateGlobalConfig({ backend: "claude", claude: { effort: "low" } });
       const client = createAgentClient(root, () => {});
-      assert(client instanceof PiRpcClient);
-      const options = (client as unknown as { options: PiRpcClientOptions }).options;
-      assertEquals(options.provider, "anthropic");
-      assertEquals(options.model, readGlobalConfig().claude.model);
-      assertEquals(options.thinking, "low");
+      assert(client instanceof ClaudeCodeClient);
+      const settings = (client as unknown as { settings: ClaudeCodeSettings }).settings;
+      assertEquals(settings.model, readGlobalConfig().claude.model);
+      assertEquals(settings.effort, "low");
     } finally {
       Deno.removeSync(root, { recursive: true });
     }

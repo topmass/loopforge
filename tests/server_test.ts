@@ -1390,24 +1390,24 @@ Deno.test("server patches the machine-wide Claude model through the backends end
     const runtime = await fetch(`${server.url}/api/runtime`).then((r) => r.json());
     assertEquals(runtime.claudeModel, "claude-opus-4-8");
 
-    // The Claude thinking level round-trips through the same endpoint.
-    const thinking = await fetch(`${server.url}/api/backend`, {
+    // The Claude effort level round-trips through the same endpoint.
+    const effort = await fetch(`${server.url}/api/backend`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ claudeThinking: "low" }),
+      body: JSON.stringify({ claudeEffort: "low" }),
     }).then((r) => r.json());
-    assertEquals(thinking.claudeThinking, "low");
+    assertEquals(effort.claudeEffort, "low");
     const runtime2 = await fetch(`${server.url}/api/runtime`).then((r) => r.json());
-    assertEquals(runtime2.claudeThinking, "low");
+    assertEquals(runtime2.claudeEffort, "low");
 
-    // An unknown thinking level is a 400.
-    const badThinking = await fetch(`${server.url}/api/backend`, {
+    // An unknown effort level is a 400.
+    const badEffort = await fetch(`${server.url}/api/backend`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ claudeThinking: "turbo" }),
+      body: JSON.stringify({ claudeEffort: "turbo" }),
     });
-    assertEquals(badThinking.status, 400);
-    await badThinking.json();
+    assertEquals(badEffort.status, 400);
+    await badEffort.json();
 
     // Neither field present is a 400.
     const empty = await fetch(`${server.url}/api/backend`, {
