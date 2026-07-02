@@ -17,6 +17,9 @@ export type ConnState = "connecting" | "live" | "down";
 
 interface AppState {
   conn: ConnState;
+  // Origin of the server the client currently talks to. "" = the primary origin
+  // that served the page; a child project's absolute origin when switched to it.
+  apiBase: string;
   board: BoardSnapshot | null;
   runtime: Runtime | null;
   lifecycle: LifecycleEvent[];
@@ -36,6 +39,8 @@ interface AppState {
   loopActiveAt: Record<string, number>;
 
   setConn: (c: ConnState) => void;
+  setApiBase: (base: string) => void;
+  resetLive: () => void;
   applyBoard: (b: BoardSnapshot) => void;
   applyActivity: (e: ActivityEvent) => void;
   setRuntime: (r: Runtime) => void;
@@ -45,6 +50,7 @@ interface AppState {
 
 export const useStore = create<AppState>((set) => ({
   conn: "connecting",
+  apiBase: "",
   board: null,
   runtime: null,
   lifecycle: [],
@@ -58,12 +64,32 @@ export const useStore = create<AppState>((set) => ({
 
   setConn: (conn) => set({ conn }),
 
+  // Switching projects: setApiBase flips the origin (an App effect keyed on it
+  // reconnects), resetLive drops the previous project's live state before the
+  // new project's board + lifecycle backlog are refetched.
+  setApiBase: (apiBase) => set({ apiBase }),
+  resetLive: () =>
+    set({
+      lifecycle: [],
+      activity: [],
+      planByGoal: {},
+      planningByGoal: {},
+      subagentsByGoal: {},
+      loopActiveAt: {},
+      activeGoalId: null,
+      selectedTaskId: null,
+    }),
+
   applyBoard: (board) =>
     set((state) => {
+      // The steering target is an OPEN goal; when none are open the board still
+      // renders its Done history and activeGoalId may stay null.
+      const stillOpen = state.activeGoalId !== null &&
+        board.goals.some((g) => g.id === state.activeGoalId && g.status === "open");
       const openGoal = board.goals.find((g) => g.status === "open");
       return {
         board,
-        activeGoalId: state.activeGoalId ?? openGoal?.id ?? board.goals.at(-1)?.id ?? null,
+        activeGoalId: stillOpen ? state.activeGoalId : openGoal?.id ?? null,
       };
     }),
 

@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import path from "node:path";
 import {
   CodexClient,
   CodexSession,
@@ -1203,6 +1204,73 @@ Deno.test("server tails DB events from other processes onto SSE exactly once", a
     server.shutdown();
     await server.finished.catch(() => {});
     await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("server hosts the project registry, CORS, and opens sibling servers", async () => {
+  const root = Deno.makeTempDirSync();
+  const second = Deno.makeTempDirSync();
+  const port = 51533 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    // The instance registers itself: its own root is current, with a live URL.
+    const listed = await fetch(`${server.url}/api/projects`).then((r) => r.json());
+    const self = listed.projects.find((p: { root: string }) => p.root === root);
+    assert(self, "expected the server's own root in the registry");
+    assertEquals(self.current, true);
+    assertEquals(self.url, server.url);
+
+    // CORS headers on a normal /api response.
+    const projectsRes = await fetch(`${server.url}/api/projects`);
+    assertEquals(projectsRes.headers.get("access-control-allow-origin"), "*");
+    await projectsRes.json();
+
+    // OPTIONS preflight is answered 204 with the CORS headers before routing.
+    const preflight = await fetch(`${server.url}/api/projects`, { method: "OPTIONS" });
+    assertEquals(preflight.status, 204);
+    assertEquals(preflight.headers.get("access-control-allow-origin"), "*");
+    assert(preflight.headers.get("access-control-allow-methods")?.includes("POST"));
+    await preflight.body?.cancel();
+
+    // Registering a nonexistent path is a 400.
+    const badAdd = await fetch(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root: `${root}/nope-not-here` }),
+    });
+    assertEquals(badAdd.status, 400);
+    await badAdd.json();
+
+    // Registering a real second temp dir adds it to the list.
+    const added = await fetch(`${server.url}/api/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root: second }),
+    }).then((r) => r.json());
+    assert(added.projects.some((p: { root: string }) => p.root === second));
+
+    // Opening the second root spawns its own full server on a DIFFERENT port.
+    const opened = await fetch(`${server.url}/api/projects/open`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root: second }),
+    }).then((r) => r.json());
+    assertEquals(typeof opened.url, "string");
+    assert(opened.url !== server.url, "child server must run on a different port");
+
+    // The child server responds with its own project name/path.
+    const childRuntime = await fetch(`${opened.url}/api/runtime`).then((r) => r.json());
+    assertEquals(childRuntime.project.name, path.basename(second));
+    assertEquals(childRuntime.project.path, second);
+  } finally {
+    // Parent shutdown tears down the child it spawned; finished awaits both so
+    // no store or listener leaks.
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await Deno.remove(second, { recursive: true }).catch(() => {});
   }
 });
 

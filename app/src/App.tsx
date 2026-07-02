@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "./store";
-import { api } from "./api";
+import { api, subscribe } from "./api";
 import { workerChips, type WorkerChip } from "./agent_status";
-import type { Goal, PlanStep } from "./types";
+import type { PlanStep, ProjectEntry } from "./types";
 
 // Shared spring - the soft, slightly bouncy motion of a calm home menu.
 const spring = { type: "spring", stiffness: 320, damping: 30 } as const;
@@ -13,9 +13,63 @@ export function App() {
   const runtime = useStore((s) => s.runtime);
   const board = useStore((s) => s.board);
   const activeGoalId = useStore((s) => s.activeGoalId);
+  const apiBase = useStore((s) => s.apiBase);
   const [logOpen, setLogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const activeGoal = board?.goals.find((g) => g.id === activeGoalId) ?? null;
+  const firstRun = useRef(true);
+
+  // Project switch: when apiBase changes, re-point the whole client at the newly
+  // active server - drop the previous project's live state, refetch its runtime
+  // + board + lifecycle backlog (unscoped, so planByGoal covers every goal), and
+  // reconnect the SSE stream. main.tsx wires the initial primary-origin
+  // connection and seed, so the first run here is a no-op.
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
+    const store = useStore.getState();
+    store.resetLive();
+    void (async () => {
+      try {
+        store.setRuntime(await api.runtime());
+      } catch {
+        // the switched-to server may still be starting
+      }
+      try {
+        store.applyBoard(await api.board());
+      } catch {
+        // board comes over SSE too
+      }
+      try {
+        const seed = await api.lifecycle();
+        for (const event of seed.events) {
+          store.applyActivity({
+            id: 0,
+            taskId: event.taskId,
+            role: "lifecycle",
+            kind: event.kind,
+            message: event.summary,
+            createdAt: "",
+            rawJson: JSON.stringify({
+              goalId: event.goalId,
+              taskRef: event.taskId,
+              data: event.data,
+            }),
+          } as Parameters<typeof store.applyActivity>[0]);
+        }
+      } catch {
+        // no backlog on the new project yet
+      }
+    })();
+    return subscribe({
+      onOpen: () => useStore.getState().setConn("live"),
+      onError: () => useStore.getState().setConn("down"),
+      onBoard: (b) => useStore.getState().applyBoard(b),
+      onActivity: (e) => useStore.getState().applyActivity(e),
+    });
+  }, [apiBase]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -34,7 +88,7 @@ export function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-h-0 flex-1 flex-col">
-          {!activeGoal ? <EmptyState /> : <KanbanView goalId={activeGoal.id} />}
+          <Board />
         </main>
         {logOpen ? <ActivityDrawer /> : <DetailPanel />}
       </div>
@@ -376,177 +430,190 @@ function TopBar(
   );
 }
 
-// One space per project: the project (cwd) IS the space - one main agent
-// growing it over time. The current (open) goal is what that agent is building
-// now; closed goals are the project's history. There is no multi-space list.
-function GoalTile(
-  { goal, active, live, onSelect, onRemove }: {
-    goal: Goal;
-    active: boolean;
-    live: boolean;
-    onSelect: () => void;
-    onRemove: () => Promise<void>;
-  },
-) {
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={spring}
-      whileHover={{ scale: 1.015 }}
-      className={`group relative flex items-center overflow-hidden rounded-2xl border p-0.5 transition-colors ${
-        active
-          ? "border-orange-300 bg-orange-50 shadow-sm"
-          : "border-slate-200 bg-slate-50 hover:bg-slate-100"
-      }`}
-    >
-      <button type="button" onClick={onSelect} className="min-w-0 flex-1 px-3 py-2.5 text-left">
-        <span className="flex items-center gap-2">
-          <span
-            className={`h-2 w-2 shrink-0 rounded-full ${
-              goal.status === "open"
-                ? live
-                  ? "animate-pulse bg-orange-500"
-                  : "bg-orange-500"
-                : "bg-emerald-500"
-            }`}
-          />
-          <span className={`truncate text-sm ${active ? "text-slate-900" : "text-slate-700"}`}>
-            {goal.text}
-          </span>
-        </span>
-        <span className="mt-0.5 block pl-4 text-[11px] text-slate-500">
-          {goal.id} · {goal.status === "open" ? (live ? "working" : "active") : "done"}
-        </span>
-      </button>
-      {confirming
-        ? (
-          <span className="flex shrink-0 items-center gap-1 pr-2 text-xs">
-            <button
-              type="button"
-              onClick={() => void onRemove()}
-              className="rounded-lg bg-red-500/90 px-2 py-0.5 text-white"
-            >
-              delete
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              className="text-slate-500 hover:text-slate-800"
-            >
-              ✕
-            </button>
-          </span>
-        )
-        : (
-          <button
-            type="button"
-            onClick={() => setConfirming(true)}
-            title="Remove goal"
-            className="shrink-0 px-2.5 py-2 text-slate-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"
-          >
-            ✕
-          </button>
-        )}
-    </motion.div>
-  );
-}
-
+// The project IS the container: the sidebar lists registered projects (repos),
+// one LoopForge command center over many. Clicking one switches the whole client
+// to that project's server (openProject -> setApiBase); the current one is
+// highlighted. Goals live on the board now, not here.
 function Sidebar() {
-  const board = useStore((s) => s.board);
-  const runtime = useStore((s) => s.runtime);
-  const activeGoalId = useStore((s) => s.activeGoalId);
-  const setActiveGoal = useStore((s) => s.setActiveGoal);
-  const loopActiveAt = useStore((s) => s.loopActiveAt);
-  const goals = board?.goals ?? [];
-  const open = goals.filter((g) => g.status === "open");
-  const history = goals.filter((g) => g.status !== "open").reverse();
-  const now = Date.now();
-  const isLive = (id: string) => now - (loopActiveAt[id] ?? 0) < 90_000;
-  const projectName = runtime?.project?.name ?? "project";
-  const projectPath = runtime?.project?.path ?? "";
+  const apiBase = useStore((s) => s.apiBase);
+  const setApiBase = useStore((s) => s.setApiBase);
+  const [projects, setProjects] = useState<ProjectEntry[]>([]);
+  const [pathInput, setPathInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const remove = async (id: string) => {
-    await api.deleteGoal(id);
-    if (activeGoalId === id) setActiveGoal(null);
+  const refresh = async () => {
+    try {
+      const { projects } = await api.listProjects();
+      setProjects(projects);
+    } catch {
+      // registry is best-effort; the sidebar just stays as-is
+    }
+  };
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  // Which registered project the client is currently pointed at: for a child
+  // server, the entry whose live URL matches apiBase; on the primary origin, the
+  // entry the primary server flagged as current.
+  const activeRoot = apiBase
+    ? projects.find((p) => p.url && new URL(p.url).origin === apiBase)?.root ?? null
+    : projects.find((p) => p.current)?.root ?? null;
+
+  const switchTo = async (root: string) => {
+    setError(null);
+    try {
+      const { url } = await api.openProject(root);
+      // The primary origin serves the page, so its own server is reached with a
+      // relative "" base; a child on another port needs its absolute origin.
+      const origin = new URL(url).origin;
+      setApiBase(origin === window.location.origin ? "" : origin);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const add = async () => {
+    const value = pathInput.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { projects } = await api.addProject(value);
+      setProjects(projects);
+      setPathInput("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <aside className="glass-soft flex w-64 shrink-0 flex-col border-r border-slate-200">
-      {/* The space = this project. One main agent grows it. */}
-      <div className="px-4 pb-1 pt-4">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Project
-        </div>
-        <div className="mt-2 flex items-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-orange-100 text-sm">
-            🛠
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-slate-900">{projectName}</span>
-            <span className="block truncate text-[11px] text-slate-500" title={projectPath}>
-              {projectPath || "one main agent"}
-            </span>
-          </span>
-        </div>
+      <div className="px-4 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Projects
       </div>
 
-      <div className="flex-1 space-y-1.5 overflow-y-auto px-3 pb-3 pt-3">
-        <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Current goal
-        </div>
-        {open.length === 0 && (
+      <div className="flex-1 space-y-1.5 overflow-y-auto px-3 pb-3 pt-2">
+        {projects.length === 0 && (
           <div className="px-2 py-2 text-sm text-slate-500">
-            No active goal. Describe one below to start the loop.
+            No projects yet. Add one below.
           </div>
         )}
-        <AnimatePresence initial={false}>
-          {open.map((g) => (
-            <GoalTile
-              key={g.id}
-              goal={g}
-              active={g.id === activeGoalId}
-              live={isLive(g.id)}
-              onSelect={() => setActiveGoal(g.id)}
-              onRemove={() => remove(g.id)}
-            />
-          ))}
-        </AnimatePresence>
+        {projects.map((p) => {
+          const active = p.root === activeRoot;
+          return (
+            <button
+              key={p.root}
+              type="button"
+              onClick={() => void switchTo(p.root)}
+              className={`flex w-full min-w-0 items-center gap-2.5 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                active
+                  ? "border-orange-300 bg-orange-50 shadow-sm"
+                  : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+              }`}
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-orange-100 text-sm">
+                🛠
+              </span>
+              <span className="min-w-0">
+                <span className={`block truncate text-sm font-semibold ${active ? "text-slate-900" : "text-slate-700"}`}>
+                  {p.name}
+                </span>
+                <span className="block truncate text-[11px] text-slate-500" title={p.root}>
+                  {p.root}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-        {history.length > 0 && (
-          <>
-            <div className="px-1 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              History
-            </div>
-            <AnimatePresence initial={false}>
-              {history.map((g) => (
-                <GoalTile
-                  key={g.id}
-                  goal={g}
-                  active={g.id === activeGoalId}
-                  live={false}
-                  onSelect={() => setActiveGoal(g.id)}
-                  onRemove={() => remove(g.id)}
-                />
-              ))}
-            </AnimatePresence>
-          </>
-        )}
+      {/* Add a project by absolute path; the server validates it exists. */}
+      <div className="border-t border-slate-200 px-3 py-3">
+        {error && <div className="mb-2 text-xs text-red-600">{error}</div>}
+        <div className="flex gap-1.5">
+          <input
+            value={pathInput}
+            onChange={(e) => setPathInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void add();
+              }
+            }}
+            placeholder="/absolute/path/to/repo"
+            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-300"
+          />
+          <button
+            type="button"
+            onClick={() => void add()}
+            disabled={busy}
+            className="rounded-xl bg-orange-600 px-3 text-xs font-semibold text-white transition hover:bg-orange-700 disabled:opacity-50"
+          >
+            {busy ? "..." : "Add"}
+          </button>
+        </div>
       </div>
     </aside>
   );
 }
 
-function planColumns(steps: PlanStep[]) {
-  return {
-    todo: steps.filter((s) => s.status === "todo"),
-    doing: steps.filter((s) => s.status === "doing"),
-    // Plan items append at the bottom of LOOP_PLAN.md, so file order is oldest
-    // first; the Done column reads newest first.
-    done: steps.filter((s) => s.status === "done").reverse(),
-  };
+// A slim strip of the OPEN goals above the board - clicking one makes it the
+// steering target for the ChatBar and the win-conditions / detail context. Open
+// goals only; closed goals live in the board's Done column instead.
+function GoalStrip() {
+  const board = useStore((s) => s.board);
+  const activeGoalId = useStore((s) => s.activeGoalId);
+  const setActiveGoal = useStore((s) => s.setActiveGoal);
+  const loopActiveAt = useStore((s) => s.loopActiveAt);
+  const open = (board?.goals ?? []).filter((g) => g.status === "open");
+  const tasks = board?.tasks ?? [];
+  if (open.length === 0) return null;
+  const now = Date.now();
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-2.5">
+      {open.map((g) => {
+        const live = now - (loopActiveAt[g.id] ?? 0) < 90_000;
+        const blocked = tasks.some((t) => t.goalId === g.id && t.status === "blocked");
+        const active = g.id === activeGoalId;
+        const words = g.text.split(/\s+/).slice(0, 5).join(" ");
+        return (
+          <button
+            key={g.id}
+            type="button"
+            onClick={() => setActiveGoal(g.id)}
+            className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors ${
+              active
+                ? "border-orange-300 bg-orange-50 shadow-sm"
+                : "border-slate-200 bg-white hover:border-slate-300"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                blocked ? "bg-amber-500" : live ? "animate-pulse bg-orange-500" : "bg-orange-500"
+              }`}
+            />
+            <span className="font-medium text-slate-700">{g.id}</span>
+            <span className="max-w-[22ch] truncate text-slate-500">{words}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// A tiny muted pill tagging which goal a board card belongs to, shown only when
+// more than one goal is open (a single open goal needs no disambiguation).
+function GoalChip({ id }: { id: string }) {
+  return (
+    <span className="mb-1 inline-block rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+      {id}
+    </span>
+  );
 }
 
 // Live per-task worker status the board already tracks (phase, what it's doing
@@ -590,32 +657,65 @@ function ActiveWorkersStrip(
   );
 }
 
-function KanbanView({ goalId }: { goalId: string }) {
-  const steps = useStore((s) => s.planByGoal[goalId]) ?? [];
-  const subagents = useStore((s) => s.subagentsByGoal[goalId]) ?? [];
+// The project-wide board: one Kanban across ALL goals. To Do / In Progress pull
+// from open goals; Done groups every goal's finished items (newest goal first)
+// so the column IS the project's history and a fresh goal starts visually clean.
+function Board() {
+  const board = useStore((s) => s.board);
+  const planByGoal = useStore((s) => s.planByGoal);
+  const activeGoalId = useStore((s) => s.activeGoalId);
+  const subagents = useStore((s) => (activeGoalId ? s.subagentsByGoal[activeGoalId] : undefined)) ??
+    [];
   const activeWorkers = useStore((s) => s.runtime?.activeAgentStatuses) ?? [];
   const externalAgents = useStore((s) => s.runtime?.externalAgents) ?? [];
   const probes = useStore((s) => s.board?.probes ?? []);
   const selectTask = useStore((s) => s.selectTask);
-  const cols = useMemo(() => planColumns(steps), [steps]);
-  const workers = useMemo(
-    () => workerChips(activeWorkers, externalAgents),
-    [activeWorkers, externalAgents],
-  );
-  const goalProbes = probes.filter((p) => p.goalId === goalId);
+
+  const goals = board?.goals ?? [];
+  const openGoals = goals.filter((g) => g.status === "open");
+  const showGoalChip = openGoals.length > 1;
+  const workers = workerChips(activeWorkers, externalAgents);
+
+  // To Do / In Progress: open goals only, tagged with their goal id.
+  const todo: { step: PlanStep; goalId: string }[] = [];
+  const doing: { step: PlanStep; goalId: string }[] = [];
+  for (const g of openGoals) {
+    for (const step of planByGoal[g.id] ?? []) {
+      if (step.status === "todo") todo.push({ step, goalId: g.id });
+      else if (step.status === "doing") doing.push({ step, goalId: g.id });
+    }
+  }
+  // Done: every goal contributes, newest goal group first (goals arrive oldest
+  // first). Plan items append oldest first, so items within a group read newest
+  // first. Empty groups are dropped.
+  const doneGroups = [...goals].reverse().map((g) => ({
+    goal: g,
+    done: (planByGoal[g.id] ?? []).filter((s) => s.status === "done").reverse(),
+  })).filter((grp) => grp.done.length > 0);
+  const doneCount = doneGroups.reduce((sum, grp) => sum + grp.done.length, 0);
+  const anyContent = todo.length > 0 || doing.length > 0 || doneGroups.length > 0;
+
+  const goalProbes = activeGoalId ? probes.filter((p) => p.goalId === activeGoalId) : [];
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
   const running = subagents.filter((s) => s.state === "running").length;
 
-  if (steps.length === 0 && subagents.length === 0) {
+  if (goals.length === 0) {
+    return <EmptyState />;
+  }
+  // No plan items on any goal yet: show the active goal's kickoff state
+  // (planning indicator / working / run-the-loop), which IdlePlan resolves.
+  if (!anyContent) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
+        <GoalStrip />
         <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
-        <IdlePlan goalId={goalId} />
+        {activeGoalId ? <IdlePlan goalId={activeGoalId} /> : <EmptyState />}
       </div>
     );
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <GoalStrip />
       {goalProbes.length > 0 && (
         <div className="border-b border-slate-200 px-4 py-2 text-xs text-slate-500">
           Win conditions: {passed}/{goalProbes.length} passing
@@ -669,43 +769,108 @@ function KanbanView({ goalId }: { goalId: string }) {
         </div>
       )}
       <div className="grid flex-1 grid-cols-3 gap-4 overflow-y-auto p-4">
-        {(["todo", "doing", "done"] as const).map((col) => (
-          <div key={col} className="flex flex-col gap-2.5">
-            <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              {col === "todo" ? "To do" : col === "doing" ? "In progress" : "Done"}{" "}
-              <span className="text-slate-400">{cols[col].length}</span>
-            </div>
-            <AnimatePresence initial={false}>
-              {cols[col].map((step, i) => (
-                <motion.button
-                  layout
-                  key={`${col}-${step.title}`}
-                  initial={{ opacity: 0, y: 12, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{ ...spring, delay: Math.min(i * 0.03, 0.2) }}
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  type="button"
-                  onClick={() => selectTask(step.title)}
-                  className={`rounded-2xl border p-3 text-left ${
-                    col === "doing"
-                      ? "border-orange-300 bg-orange-50 shadow-sm"
-                      : col === "done"
-                      ? "border-emerald-300 bg-emerald-50"
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <div className="text-sm font-medium text-slate-900">{step.title}</div>
-                  {step.note && (
-                    <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
-                      {step.note}
-                    </div>
-                  )}
-                </motion.button>
-              ))}
-            </AnimatePresence>
+        {/* To Do */}
+        <div className="flex flex-col gap-2.5">
+          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            To do <span className="text-slate-400">{todo.length}</span>
           </div>
-        ))}
+          <AnimatePresence initial={false}>
+            {todo.map(({ step, goalId }, i) => (
+              <motion.button
+                layout
+                key={`todo-${goalId}-${step.title}`}
+                initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ ...spring, delay: Math.min(i * 0.03, 0.2) }}
+                whileHover={{ scale: 1.02, y: -2 }}
+                type="button"
+                onClick={() => selectTask(step.title)}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left"
+              >
+                {showGoalChip && <GoalChip id={goalId} />}
+                <div className="text-sm font-medium text-slate-900">{step.title}</div>
+                {step.note && (
+                  <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+                    {step.note}
+                  </div>
+                )}
+              </motion.button>
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {/* In Progress */}
+        <div className="flex flex-col gap-2.5">
+          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            In progress <span className="text-slate-400">{doing.length}</span>
+          </div>
+          <AnimatePresence initial={false}>
+            {doing.map(({ step, goalId }, i) => (
+              <motion.button
+                layout
+                key={`doing-${goalId}-${step.title}`}
+                initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ ...spring, delay: Math.min(i * 0.03, 0.2) }}
+                whileHover={{ scale: 1.02, y: -2 }}
+                type="button"
+                onClick={() => selectTask(step.title)}
+                className="rounded-2xl border border-orange-300 bg-orange-50 p-3 text-left shadow-sm"
+              >
+                {showGoalChip && <GoalChip id={goalId} />}
+                <div className="text-sm font-medium text-slate-900">{step.title}</div>
+                {step.note && (
+                  <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+                    {step.note}
+                  </div>
+                )}
+              </motion.button>
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {/* Done: the project's history, grouped by goal (newest goal first). */}
+        <div className="flex flex-col gap-2.5">
+          <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Done <span className="text-slate-400">{doneCount}</span>
+          </div>
+          {doneGroups.map((grp) => (
+            <div key={grp.goal.id} className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-2 px-1 pt-1 text-[11px] text-slate-500">
+                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                  {grp.goal.id}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{grp.goal.text.slice(0, 40)}</span>
+                <span className="shrink-0 text-slate-400">{grp.done.length} done</span>
+              </div>
+              <AnimatePresence initial={false}>
+                {grp.done.map((step, i) => (
+                  <motion.button
+                    layout
+                    key={`done-${grp.goal.id}-${step.title}`}
+                    initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.96 }}
+                    transition={{ ...spring, delay: Math.min(i * 0.03, 0.2) }}
+                    whileHover={{ scale: 1.02, y: -2 }}
+                    type="button"
+                    onClick={() => selectTask(step.title)}
+                    className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-left"
+                  >
+                    <div className="text-sm font-medium text-slate-900">{step.title}</div>
+                    {step.note && (
+                      <div className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-slate-500">
+                        {step.note}
+                      </div>
+                    )}
+                  </motion.button>
+                ))}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -800,15 +965,16 @@ function IdlePlan({ goalId }: { goalId: string }) {
 // sub-agent) its branch and merge state, plus a timeline of related events.
 function DetailPanel() {
   const selectedTaskId = useStore((s) => s.selectedTaskId);
-  const activeGoalId = useStore((s) => s.activeGoalId);
-  const steps = useStore((s) => (activeGoalId ? s.planByGoal[activeGoalId] : undefined)) ?? [];
-  const subagents = useStore((s) => (activeGoalId ? s.subagentsByGoal[activeGoalId] : undefined)) ?? [];
+  const planByGoal = useStore((s) => s.planByGoal);
+  const subagentsByGoal = useStore((s) => s.subagentsByGoal);
   const lifecycle = useStore((s) => s.lifecycle);
   const selectTask = useStore((s) => s.selectTask);
   if (!selectedTaskId) return null;
 
-  const step = steps.find((s) => s.title === selectedTaskId);
-  const sub = subagents.find((s) => s.title === selectedTaskId);
+  // The board is project-wide, so a selected card can belong to any goal - look
+  // it up by title across every goal's plan / sub-agents, not just the active.
+  const step = Object.values(planByGoal).flat().find((s) => s.title === selectedTaskId);
+  const sub = Object.values(subagentsByGoal).flat().find((s) => s.title === selectedTaskId);
   const isSub = Boolean(sub);
   const related = lifecycle
     .filter((e) => e.taskId === selectedTaskId || e.data?.title === selectedTaskId)

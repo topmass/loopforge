@@ -14,6 +14,7 @@ import {
   readGlobalConfig,
   updateGlobalConfig,
 } from "../board/global_config.ts";
+import { listProjects, registerProject } from "../board/projects.ts";
 import { CodexClient } from "../workers/codex_app_server.ts";
 import { gitMergeBranch } from "../workers/git_utils.ts";
 import { GoalPlanner } from "../workers/goal_planner.ts";
@@ -51,6 +52,49 @@ export interface LoopForgeServerOptions {
 
 const APP_ROOT = path.normalize(decodeURIComponent(new URL("../../", import.meta.url).pathname));
 
+// One Deno process can host several projects at once - each open project is its
+// own full startServer instance. This process-wide registry lets any instance
+// answer "which projects are live here and at what URL" and hand a caller the
+// URL of a sibling, spawning it on a free port if needed. Keyed by normalized
+// root.
+const openServers = new Map<string, { url: string; shutdown: () => void }>();
+
+// Probe for a free port from `start` upward by opening then immediately closing
+// a listener. ponytail: linear TOCTOU probe, fine for a localhost tool opening
+// a handful of projects; swap for an ephemeral-port handoff if that ever bites.
+function findFreePort(start = 4764): number {
+  for (let port = start; port < start + 500; port++) {
+    try {
+      const listener = Deno.listen({ port });
+      listener.close();
+      return port;
+    } catch {
+      // Port in use; try the next one.
+    }
+  }
+  throw new Error("No free port available for a child project server.");
+}
+
+function dirExists(target: string): boolean {
+  try {
+    return Deno.statSync(target).isDirectory;
+  } catch {
+    return false;
+  }
+}
+
+// The project list shape the GUI consumes: registry entries, each with the live
+// URL from openServers (null when not open in this process) and whether it is
+// the instance answering the request.
+function projectList(currentRoot: string) {
+  return listProjects().map((entry) => ({
+    root: entry.root,
+    name: entry.name,
+    url: openServers.get(entry.root)?.url ?? null,
+    current: entry.root === currentRoot,
+  }));
+}
+
 export function startServer(
   root = Deno.cwd(),
   port = 4733,
@@ -60,6 +104,17 @@ export function startServer(
   const store = new BoardStore(normalizedRoot);
   store.initProject();
   store.recoverStaleRuns();
+  // Best-effort registry write: a throwaway temp dir in tests must not crash
+  // boot, so a failed register (or non-directory root) is swallowed.
+  try {
+    registerProject(normalizedRoot);
+  } catch {
+    // Registry is a convenience for the sidebar, not required to serve.
+  }
+  // Child project servers this instance spawned via /api/projects/open, so it
+  // can tear only those down on shutdown (never a sibling it did not create),
+  // and await their teardown so no store/listener leaks.
+  const spawnedChildren = new Map<string, LoopForgeServer>();
   const clients = new Set<Client>();
   const encoder = new TextEncoder();
   let queueRunning = false;
@@ -205,7 +260,55 @@ export function startServer(
     async (request) => {
       const url = new URL(request.url);
 
+      // Localhost-only command center: the GUI is served from the primary
+      // origin but fetches sibling project servers on other ports, so preflight
+      // is answered up front and every /api response is permissively CORS-open.
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders() });
+      }
+
       try {
+        if (url.pathname === "/api/projects" && request.method === "GET") {
+          return json({ projects: projectList(normalizedRoot) });
+        }
+
+        if (url.pathname === "/api/projects" && request.method === "POST") {
+          const body = await readJson<{ root?: string }>(request);
+          const target = body.root?.trim() ?? "";
+          if (!target) {
+            return json({ error: "root is required." }, 400);
+          }
+          try {
+            registerProject(target);
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+          }
+          return json({ projects: projectList(normalizedRoot) });
+        }
+
+        // Hand back the URL of the project's own server, spawning one on a free
+        // port (with the same options this instance received, so injected fake
+        // codex clients reach child servers in tests) if it is not live yet.
+        if (url.pathname === "/api/projects/open" && request.method === "POST") {
+          const body = await readJson<{ root?: string }>(request);
+          const raw = body.root?.trim() ?? "";
+          if (!raw) {
+            return json({ error: "root is required." }, 400);
+          }
+          const target = normalizeRoot(raw);
+          const existing = openServers.get(target);
+          if (existing) {
+            return json({ url: existing.url });
+          }
+          const known = listProjects().some((entry) => entry.root === target);
+          if (!known && !dirExists(target)) {
+            return json({ error: `${target} is not a registered project.` }, 400);
+          }
+          const child = startServer(target, findFreePort(), options);
+          spawnedChildren.set(target, child);
+          return json({ url: child.url });
+        }
+
         if (url.pathname === "/api/events") {
           let streamController: Client | null = null;
           return new Response(
@@ -226,6 +329,7 @@ export function startServer(
                 "content-type": "text/event-stream",
                 "cache-control": "no-cache",
                 connection: "keep-alive",
+                ...corsHeaders(),
               },
             },
           );
@@ -1256,23 +1360,34 @@ export function startServer(
     },
   );
 
-  return {
+  const instance: LoopForgeServer = {
     url: `http://127.0.0.1:${port}`,
     shutdown: () => {
       clearInterval(supervisorTimer);
       clearInterval(tailTimer);
+      openServers.delete(normalizedRoot);
+      // Tear down only the children this instance spawned, so shutting one hub
+      // down does not kill a sibling opened by another instance.
+      for (const child of spawnedChildren.values()) {
+        child.shutdown();
+      }
       abort.abort();
     },
-    finished: server.finished.then(() => {
-      clearInterval(supervisorTimer);
-      clearInterval(tailTimer);
-      store.close();
-    }).catch(() => {
-      clearInterval(supervisorTimer);
-      clearInterval(tailTimer);
-      store.close();
-    }),
+    finished: server.finished.then(closeSelf).catch(closeSelf),
   };
+  // Awaiting this instance's finished also awaits the children it spawned, so a
+  // clean shutdown leaves no open stores or listeners.
+  async function closeSelf() {
+    clearInterval(supervisorTimer);
+    clearInterval(tailTimer);
+    openServers.delete(normalizedRoot);
+    store.close();
+    await Promise.all(
+      [...spawnedChildren.values()].map((child) => child.finished.catch(() => {})),
+    );
+  }
+  openServers.set(normalizedRoot, { url: instance.url, shutdown: instance.shutdown });
+  return instance;
 }
 
 // Serve the built React GUI from app/dist under /app, SPA-style.
@@ -1344,6 +1459,16 @@ async function readJson<T>(request: Request): Promise<T> {
 function json(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders() },
   });
+}
+
+// Localhost-only tool: permissive CORS so the primary-origin GUI can fetch the
+// sibling project servers this process runs on other ports.
+function corsHeaders(): Record<string, string> {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "Content-Type",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  };
 }

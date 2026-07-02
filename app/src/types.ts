@@ -38,6 +38,16 @@ export interface Goal {
   closureSummary: string;
 }
 
+// A registered project as the /api/projects list reports it: registry root +
+// name, the live server URL when open in this process (null otherwise), and
+// whether it is the project whose server served this page.
+export interface ProjectEntry {
+  root: string;
+  name: string;
+  url: string | null;
+  current: boolean;
+}
+
 export interface Task {
   id: string;
   goalId: string;

@@ -2,19 +2,26 @@
 // API built in phases 1-5; nothing here is LoopForge-specific logic, just
 // transport.
 
-import type { ActivityEvent, BoardSnapshot, LifecycleEvent, Runtime } from "./types";
+import type {
+  ActivityEvent,
+  BoardSnapshot,
+  LifecycleEvent,
+  ProjectEntry,
+  Runtime,
+} from "./types";
+import { useStore } from "./store";
 
 const LIFECYCLE_ROLE = "lifecycle";
 
-// In the browser the GUI is served by the LoopForge server, so API paths are
-// relative. In the Tauri native window there is no origin server, so the Rust
-// shell spawns one and we point at it on localhost. setApiBase wires that.
-let API_BASE = "";
+// The origin the client talks to lives in the store (apiBase): "" = the primary
+// origin that served the page, a child project's absolute origin when switched.
+// setApiBase writes it (the Tauri shell still calls this to point at its spawned
+// server); an App effect keyed on the store value reconnects the SSE stream.
 export function setApiBase(base: string): void {
-  API_BASE = base.replace(/\/$/, "");
+  useStore.getState().setApiBase(base.replace(/\/$/, ""));
 }
 export function apiUrl(path: string): string {
-  return `${API_BASE}${path}`;
+  return `${useStore.getState().apiBase}${path}`;
 }
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -29,9 +36,36 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// The project registry is owned by the server that served the page (the primary
+// origin), so these always fetch relative to it - never the switched apiBase.
+async function primaryFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`${path} -> ${res.status} ${body.slice(0, 200)}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export const api = {
   board: () => jsonFetch<BoardSnapshot>("/api/board"),
   runtime: () => jsonFetch<Runtime>("/api/runtime"),
+  // Projects: registry read/add and "open" (get the project server's URL,
+  // spawning it if needed). All three hit the primary origin.
+  listProjects: () => primaryFetch<{ projects: ProjectEntry[] }>("/api/projects"),
+  addProject: (root: string) =>
+    primaryFetch<{ projects: ProjectEntry[] }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ root }),
+    }),
+  openProject: (root: string) =>
+    primaryFetch<{ url: string }>("/api/projects/open", {
+      method: "POST",
+      body: JSON.stringify({ root }),
+    }),
   lifecycle: (goalId?: string) =>
     jsonFetch<{ events: LifecycleEvent[] }>(
       `/api/lifecycle${goalId ? `?goalId=${encodeURIComponent(goalId)}` : ""}`,
@@ -121,6 +155,11 @@ export function parseLifecycle(event: ActivityEvent & { rawJson?: string | null 
   };
 }
 
+// Only one live SSE connection at a time: a new subscribe (initial connect or a
+// project switch) closes the previous stream first, so reconnecting can never
+// leave two open against different origins.
+let activeSource: EventSource | null = null;
+
 // Subscribe to the server-sent event stream. Returns a cleanup function.
 export function subscribe(handlers: {
   onBoard: (b: BoardSnapshot) => void;
@@ -128,7 +167,9 @@ export function subscribe(handlers: {
   onOpen: () => void;
   onError: () => void;
 }): () => void {
+  activeSource?.close();
   const source = new EventSource(apiUrl("/api/events"));
+  activeSource = source;
   source.addEventListener("open", handlers.onOpen);
   source.addEventListener("error", handlers.onError);
   source.addEventListener("board", (e) => {
@@ -145,5 +186,10 @@ export function subscribe(handlers: {
       // ignore
     }
   });
-  return () => source.close();
+  return () => {
+    source.close();
+    if (activeSource === source) {
+      activeSource = null;
+    }
+  };
 }
