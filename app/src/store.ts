@@ -8,6 +8,7 @@ import type {
   ActivityEvent,
   BoardSnapshot,
   LifecycleEvent,
+  LoopStatus,
   PlanStep,
   Runtime,
 } from "./types";
@@ -49,6 +50,8 @@ interface AppState {
   // Last time a goal's loop emitted activity, so the UI can show "working"
   // before the first plan.updated lands (a long first turn looks idle otherwise).
   loopActiveAt: Record<string, number>;
+  // Latest per-iteration loop telemetry (loop.status events) per goal.
+  loopStatusByGoal: Record<string, LoopStatus>;
 
   setConn: (c: ConnState) => void;
   setTheme: (t: Theme) => void;
@@ -75,6 +78,7 @@ export const useStore = create<AppState>((set) => ({
   activeGoalId: null,
   selectedTaskId: null,
   loopActiveAt: {},
+  loopStatusByGoal: {},
 
   setConn: (conn) => set({ conn }),
 
@@ -100,6 +104,7 @@ export const useStore = create<AppState>((set) => ({
       planningByGoal: {},
       subagentsByGoal: {},
       loopActiveAt: {},
+      loopStatusByGoal: {},
       activeGoalId: null,
       selectedTaskId: null,
     }),
@@ -151,6 +156,19 @@ export const useStore = create<AppState>((set) => ({
           ) {
             next.planningByGoal = { ...state.planningByGoal, [lifecycle.goalId]: false };
           }
+        }
+        // loop.status carries the loop's live telemetry for the board strip.
+        if (lifecycle.kind === "loop.status" && lifecycle.goalId) {
+          next.loopStatusByGoal = {
+            ...state.loopStatusByGoal,
+            [lifecycle.goalId]: {
+              iteration: Number(lifecycle.data.iteration) || 0,
+              maxIterations: Number(lifecycle.data.maxIterations) || 0,
+              tokensUsed: Number(lifecycle.data.tokensUsed) || 0,
+              elapsedMs: Number(lifecycle.data.elapsedMs) || 0,
+              reason: typeof lifecycle.data.reason === "string" ? lifecycle.data.reason : "",
+            },
+          };
         }
         // plan.updated carries the authoritative step list for its goal.
         if (lifecycle.kind === "plan.updated" && lifecycle.goalId) {

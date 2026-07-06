@@ -93,6 +93,7 @@ export class GoalLoopRunner {
     if (goal.status === "closed") {
       return { goalId, iterations: 0, outcome: "closed", detail: "Goal is already closed." };
     }
+    const loopStartedAt = Date.now();
     const deadline = Date.now() + (this.options.hours ?? 2) * 3_600_000;
     const maxIterations = this.options.maxIterations ?? 48;
     // Lazily ensure the project is its own git repo with a baseline commit -
@@ -195,6 +196,7 @@ export class GoalLoopRunner {
       let lastFingerprint = "";
       let stalls = 0;
       let fanoutNudged = false;
+      let greenStreak = 0;
       let probeFeedback = "";
       let lastObjective = goal.text;
       for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -226,6 +228,22 @@ export class GoalLoopRunner {
             wrapUp ? ` (wrap-up: ${wrapUp})` : ""
           }`,
         );
+        // Live status for the GUI strip: where the loop is, what it costs,
+        // and the one-line reason driving this turn (last turn's feedback).
+        const statusReason = probeFeedback.split("\n")[0].slice(0, 160).replace(/[:\s]+$/, "");
+        this.emit(this.store.appendLifecycleEvent({
+          kind: "loop.status",
+          goalId,
+          taskId: null,
+          summary: statusReason || `iteration ${iteration}`,
+          data: {
+            iteration,
+            maxIterations,
+            tokensUsed,
+            elapsedMs: Date.now() - loopStartedAt,
+            reason: statusReason,
+          },
+        }));
         responseText = "";
         const planExists = this.store.listLoopPlanItems(goalId).length > 0;
         // Clarify-first: only on the very first turn, before any plan, and only
@@ -418,6 +436,58 @@ export class GoalLoopRunner {
             `Completion claimed but win conditions ${summary.passed}/${summary.total}; continuing.`,
           );
           continue;
+        }
+
+        // Independent completion check: once real work exists, the shell runs
+        // the win conditions itself instead of waiting for the agent to
+        // declare (models grind on verification busywork instead of saying
+        // done). First genuine green pass nudges the agent to declare or name
+        // what remains; a second consecutive green pass closes the goal - the
+        // probes, not the worker, decide done. Pre-green baseline probes never
+        // count: passing them proves nothing about the new work.
+        if (
+          this.store.listProbes(goalId).length &&
+          items.some((item) => item.status === "done")
+        ) {
+          const shell = await runGoalProbes(
+            this.root,
+            this.store,
+            goalId,
+            assignment.worktreePath,
+          );
+          const provesNewWork = shell.total > 0 && shell.passed === shell.total &&
+            shell.results.some((result) => result.passed && !preGreen.has(result.probe.id));
+          if (provesNewWork) {
+            greenStreak++;
+            if (greenStreak >= 2) {
+              this.emitEvent(
+                goalId,
+                "probes",
+                "Win conditions pass on consecutive shell checks; closing without the agent's declaration.",
+              );
+              return await this.completeGoal(
+                goalId,
+                iteration,
+                assignment.branchName,
+                shell,
+                false,
+                "",
+              );
+            }
+            probeFeedback =
+              `LoopForge ran the win conditions itself: ${shell.passed}/${shell.total} pass (${
+                probeLights(this.store.listProbes(goalId))
+              }). If the goal is genuinely done, mark any remaining items with ./lf-task done and ` +
+              "reply with the single line LOOP_COMPLETE. If real work remains, name it in one " +
+              "line and do it - do not re-verify what already passes.";
+            this.emitEvent(
+              goalId,
+              "probes",
+              `Win conditions ${shell.passed}/${shell.total} pass; nudged the loop to declare completion.`,
+            );
+            continue;
+          }
+          greenStreak = 0;
         }
 
         // Reaching here means no fan-out was requested this turn (every fan-out

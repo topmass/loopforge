@@ -272,6 +272,16 @@ root"); attended merge-holds are skipped since there is nothing to merge - weak 
 manual-verification notes are appended to the closure text instead. Root mode never stores the
 project root as `loopWorktree` (the closure cleanup path reclaims stored worktrees).
 
+Independent completion check: once at least one plan item is done, the shell runs the win
+conditions itself after every turn where the agent did not claim completion. A genuine all-green
+pass (at least one probe that was red at baseline now passes) first injects a declare-or-name-
+what-remains nudge; a second consecutive green pass closes the goal via `completeGoal` without
+the agent's declaration. This is the fix for models grinding on verification busywork instead of
+saying done - the probes, not the worker, decide completion.
+
+Each iteration also emits a `loop.status` lifecycle event (`{iteration, maxIterations,
+tokensUsed, elapsedMs, reason}`) that feeds the GUI's live loop telemetry strip.
+
 Loop outcomes are `complete | merged | held | blocked | budget | stalled | closed | deleted`.
 Deleting a goal mid-run stops its loop cleanly: the runner checks `store.goalExists()` at the top
 of each iteration and after each turn, and a 500ms watch during `runTurn` calls the backend's
@@ -319,6 +329,10 @@ Stack and layout:
 - Status/liveness vocabulary lives in the `STATUS` map in `app/src/components/ui.ts`; live things
   get the amber `radar-dot` (keyframes in `index.css`). No left-border accent stripes on cards -
   state is signaled with STATUS dots and surface/shadow shifts.
+
+Live loop telemetry: `loop.status` lifecycle events land in `loopStatusByGoal` (store) and
+render in the scoped board's win-conditions strip as "iter N/M · Xk tok · Ym · waiting on: ..."
+while the loop is active (recent `loopActiveAt`) and the goal is open (`BoardView`).
 
 Loop-scoped board and composer targets:
 

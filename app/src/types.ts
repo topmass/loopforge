@@ -21,6 +21,7 @@ export type LifecycleKind =
   | "subagent.spawned"
   | "subagent.progress"
   | "subagent.merged"
+  | "loop.status"
   | "verified";
 
 export interface LifecycleEvent {
@@ -29,6 +30,16 @@ export interface LifecycleEvent {
   taskId: string | null;
   summary: string;
   data: Record<string, unknown>;
+}
+
+// Per-iteration loop telemetry from loop.status lifecycle events - the GUI's
+// "iter 4 · 12k tok · 8m · waiting on: ..." strip.
+export interface LoopStatus {
+  iteration: number;
+  maxIterations: number;
+  tokensUsed: number;
+  elapsedMs: number;
+  reason: string;
 }
 
 export interface Goal {

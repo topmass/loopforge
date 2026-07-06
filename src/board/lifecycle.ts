@@ -25,6 +25,7 @@ export type LifecycleKind =
   | "subagent.spawned"
   | "subagent.progress"
   | "subagent.merged"
+  | "loop.status"
   | "verified";
 
 export type PlanStepStatus = "todo" | "doing" | "done";

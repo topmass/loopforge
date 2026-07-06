@@ -323,6 +323,50 @@ Deno.test("goal loop stops with outcome deleted when the goal is removed mid-run
   }
 });
 
+Deno.test("shell-run probes nudge an undeclared loop and close it on the second green pass", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  const events: string[] = [];
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Ship the widget without ever saying done");
+    store.addProbes(goal.id, [{ label: "widget exists", command: "test -f widget.txt" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: (event) => events.push(`${event.kind}: ${event.message}`),
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd, turn) => {
+          if (turn === 1) {
+            const item = store.addLoopPlanItem(goal.id, "Create the widget");
+            // The failure mode from real local-model runs: the work is done
+            // and the probes pass, but the plan keeps an open verification
+            // item and the agent grinds on it forever instead of declaring.
+            store.addLoopPlanItem(goal.id, "Verify everything thoroughly");
+            store.setLoopPlanItemStatus(goal.id, item.id, "done", "wrote widget.txt");
+            await Deno.writeTextFile(`${cwd}/widget.txt`, "widget\n");
+          }
+          return "Still verifying everything works.";
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    // Turn 1 goes green -> nudge; turn 2 stays green with no declaration ->
+    // the shell closes the goal itself.
+    assertEquals(report.outcome, "merged");
+    assertEquals(client!.turns, 2);
+    assertStringIncludes(client!.prompts[1], "LoopForge ran the win conditions itself");
+    assertStringIncludes(client!.prompts[1], "LOOP_COMPLETE");
+    assertEquals(store.getGoal(goal.id).status, "closed");
+    assert(events.some((line) => line.includes("closing without the agent's declaration")));
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("goal loop with worktrees disabled runs in the project root and closes without merging", async () => {
   const root = Deno.makeTempDirSync();
   await seedRepo(root);

@@ -59,6 +59,18 @@ function ActiveWorkersStrip(
   );
 }
 
+// Compact numbers for the loop telemetry strip: 41200 -> "41k".
+function fmtTokens(tokens: number): string {
+  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
+}
+
+// 8m, 62m -> "1h 2m".
+function fmtElapsed(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 // The project-wide board: one Kanban across ALL goals. To Do / In Progress pull
 // from open goals; Done groups every goal's finished items (newest goal first)
 // so the column IS the project's history and a fresh goal starts visually clean.
@@ -109,6 +121,15 @@ export function BoardView() {
   const goalProbes = activeGoalId ? probes.filter((p) => p.goalId === activeGoalId) : [];
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
   const running = subagents.filter((s) => s.state === "running").length;
+  // Live loop telemetry for the scoped goal: shown while the loop is active
+  // (recent activity) and the goal is still open.
+  const loopStatus = useStore((s) => (activeGoalId ? s.loopStatusByGoal[activeGoalId] : undefined));
+  const statusActiveAt = useStore((s) => (activeGoalId ? s.loopActiveAt[activeGoalId] : undefined));
+  const scopedGoal = activeGoalId ? goals.find((g) => g.id === activeGoalId) : undefined;
+  const showLoopStatus = Boolean(
+    loopStatus && scopedGoal?.status === "open" &&
+      statusActiveAt !== undefined && Date.now() - statusActiveAt < 120_000,
+  );
 
   if (goals.length === 0) {
     return <EmptyState />;
@@ -127,9 +148,20 @@ export function BoardView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <GoalStrip />
-      {goalProbes.length > 0 && (
-        <div className="border-b border-line px-4 py-2 text-xs text-ink-muted">
-          Win conditions: {passed}/{goalProbes.length} passing
+      {(goalProbes.length > 0 || showLoopStatus) && (
+        <div className="flex items-baseline gap-3 border-b border-line px-4 py-2 text-xs text-ink-muted">
+          {goalProbes.length > 0 && (
+            <span className="shrink-0">
+              Win conditions: {passed}/{goalProbes.length} passing
+            </span>
+          )}
+          {showLoopStatus && loopStatus && (
+            <span className="min-w-0 truncate text-ink-faint" title={loopStatus.reason}>
+              iter {loopStatus.iteration}/{loopStatus.maxIterations} ·{" "}
+              {fmtTokens(loopStatus.tokensUsed)} tok · {fmtElapsed(loopStatus.elapsedMs)}
+              {loopStatus.reason ? ` · waiting on: ${loopStatus.reason}` : ""}
+            </span>
+          )}
         </div>
       )}
       <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
