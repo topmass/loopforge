@@ -449,6 +449,20 @@ Deno.test("server updates planner routing and max concurrent agents", async () =
     const rejected = await patchJson("/api/workflow/agents", { maxConcurrentAgents: 0 });
     assertEquals(rejected.status, 400);
     await rejected.json();
+
+    // Per-project worktree isolation round-trips through the same workflow file.
+    const workspace = await patchJson("/api/workflow/workspace", { useWorktrees: false })
+      .then((response) => response.json());
+    assertEquals(workspace.useWorktrees, false);
+    assertStringIncludes(
+      await Deno.readTextFile(`${root}/WORKFLOW.md`),
+      "use_worktrees: false",
+    );
+    const runtimeOff = await fetch(`${server.url}/api/runtime`).then((response) => response.json());
+    assertEquals(runtimeOff.workflow.useWorktrees, false);
+    const badWorkspace = await patchJson("/api/workflow/workspace", { useWorktrees: "nope" });
+    assertEquals(badWorkspace.status, 400);
+    await badWorkspace.json();
   } finally {
     await patchJson("/api/planner", { enabled: false }).then((response) => response.json());
     server.shutdown();
@@ -1262,11 +1276,12 @@ Deno.test("server hosts the project registry, CORS, and opens sibling servers", 
     assertEquals(badAdd.status, 400);
     await badAdd.json();
 
-    // Registering a real second temp dir adds it to the list.
+    // Registering a real second temp dir adds it to the list. Pasted form
+    // (shell quotes, trailing slash) parses to the same clean root.
     const added = await fetch(`${server.url}/api/projects`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ root: second }),
+      body: JSON.stringify({ root: `"${second}/"` }),
     }).then((r) => r.json());
     assert(added.projects.some((p: { root: string }) => p.root === second));
 

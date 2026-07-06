@@ -27,6 +27,7 @@ export interface WorkflowRuntime {
   fastMode: boolean;
   githubPrReview: boolean;
   worktreesDir: string;
+  useWorktrees: boolean;
   hooks: Record<WorkflowHookStage, WorkflowHook[]>;
   authority: WorkflowAuthority;
   instructions: string;
@@ -143,6 +144,7 @@ export function parseWorkflow(source: string): WorkflowRuntime {
     fastMode: booleanValue(codex.fast_mode, true),
     githubPrReview: booleanValue(github.pr_review, false),
     worktreesDir: stringValue(workspace.worktrees_dir, ".loopforge/worktrees"),
+    useWorktrees: booleanValue(workspace.use_worktrees, true),
     hooks: normalizeHooks(hooks),
     authority: {
       publish: booleanValue(authority.publish, true),
@@ -177,6 +179,27 @@ export function setWorkflowMaxConcurrentAgents(root: string, count: number): Wor
   return parseWorkflow(next);
 }
 
+// Same line surgery for workspace.use_worktrees: replace in place, or insert
+// one under workspace: when it is missing.
+export function setWorkflowUseWorktrees(root: string, value: boolean): WorkflowRuntime {
+  ensureWorkflow(root);
+  const target = workflowPath(root);
+  const source = Deno.readTextFileSync(target);
+  const existing = source.match(/^(\s*)use_worktrees:\s*\S.*$/m);
+  let next: string;
+  if (existing) {
+    next = source.replace(existing[0], `${existing[1]}use_worktrees: ${value}`);
+  } else {
+    const workspaceLine = source.match(/^workspace:\s*$/m);
+    if (!workspaceLine) {
+      throw new Error("WORKFLOW.md frontmatter has no workspace: section to update.");
+    }
+    next = source.replace(workspaceLine[0], `workspace:\n  use_worktrees: ${value}`);
+  }
+  Deno.writeTextFileSync(target, next);
+  return parseWorkflow(next);
+}
+
 export function defaultWorkflow(): string {
   return `---
 version: 1
@@ -198,6 +221,7 @@ authority:
   max_triage_retries: 2
 workspace:
   worktrees_dir: .loopforge/worktrees
+  use_worktrees: true
   hooks:
     after_create: []
     before_run: []

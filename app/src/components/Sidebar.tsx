@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { useStore } from "../store";
-import { api } from "../api";
+import { api, cleanFolderInput, looksLikeFolderPath } from "../api";
 import type { Goal, ProjectEntry } from "../types";
 import { STATUS, useArmedDelete } from "./ui";
 import { LineMark } from "./marks";
@@ -86,7 +86,7 @@ export function Sidebar() {
   };
 
   const add = async () => {
-    const value = pathInput.trim();
+    const value = cleanFolderInput(pathInput);
     if (!value || busy) return;
     setBusy(true);
     setError(null);
@@ -286,7 +286,7 @@ export function Sidebar() {
                 void add();
               }
             }}
-            placeholder="/absolute/path/to/repo"
+            placeholder="paste a folder path (~, file://, or C:\ work too)"
             className="min-w-0 flex-1 rounded-xl border border-line bg-surface-overlay px-2.5 py-1.5 text-xs text-ink outline-none transition placeholder:text-ink-faint focus:border-accent"
           />
           <button
@@ -311,7 +311,9 @@ export function Sidebar() {
       <AnimatePresence>
         {pickerOpen && (
           <FolderPicker
-            initialPath={pathInput.trim().startsWith("/") ? pathInput.trim() : ""}
+            initialPath={looksLikeFolderPath(cleanFolderInput(pathInput))
+              ? cleanFolderInput(pathInput)
+              : ""}
             onAdded={(list) => {
               setProjects(list);
               setPathInput("");

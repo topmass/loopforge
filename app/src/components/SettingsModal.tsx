@@ -366,6 +366,23 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        <label className="flex cursor-pointer items-center justify-between gap-3 border-b border-line py-3">
+          <div>
+            <div className="text-sm font-medium text-ink">Isolated worktrees</div>
+            <div className="text-xs text-ink-muted">
+              Run each loop in its own git worktree and merge only on green probes. Off = agents
+              work directly in this project folder, you own git, and fan-out is unavailable.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={runtime?.workflow?.useWorktrees !== false}
+            onChange={(e) =>
+              void wrap("worktrees", () => api.setUseWorktrees(e.target.checked))}
+            className="h-4 w-4 accent-accent"
+          />
+        </label>
+
         <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 border-t border-line pt-3">
           <div>
             <div className="text-sm font-medium text-ink">Push sub-agent branches</div>

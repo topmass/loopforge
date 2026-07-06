@@ -53,6 +53,26 @@ async function primaryFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Light client-side cleanup for pasted folder paths (shell-quoted paths, stray
+// whitespace). The server's parseFolderInput is authoritative and additionally
+// handles file:// links, ~ expansion, and Windows shapes.
+export function cleanFolderInput(raw: string): string {
+  let value = raw.trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"') && value.length > 1) ||
+    (value.startsWith("'") && value.endsWith("'") && value.length > 1)
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+}
+
+// True when input plausibly names a folder: unix/home paths, Windows drive or
+// UNC paths, or a file:// link. Gates seeding the browse picker with it.
+export function looksLikeFolderPath(value: string): boolean {
+  return /^(\/|~([/\\]|$)|[A-Za-z]:[/\\]|\\\\|file:\/\/)/.test(value);
+}
+
 export const api = {
   board: () => jsonFetch<BoardSnapshot>("/api/board"),
   runtime: () => jsonFetch<Runtime>("/api/runtime"),
@@ -137,6 +157,12 @@ export const api = {
     jsonFetch<{ maxParallelAgents: number }>("/api/maxagents", {
       method: "PATCH",
       body: JSON.stringify({ value }),
+    }),
+  // Per-project workspace isolation (WORKFLOW.md workspace.use_worktrees).
+  setUseWorktrees: (useWorktrees: boolean) =>
+    jsonFetch<{ useWorktrees: boolean }>("/api/workflow/workspace", {
+      method: "PATCH",
+      body: JSON.stringify({ useWorktrees }),
     }),
   // Per-project codex power knobs: model, reasoning effort, fast mode. The
   // runtime line picks the new values up on the modal's refresh.

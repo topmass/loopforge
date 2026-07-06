@@ -4,6 +4,7 @@ import {
   parseWorkflow,
   readWorkflow,
   setWorkflowMaxConcurrentAgents,
+  setWorkflowUseWorktrees,
 } from "../src/workflow/workflow.ts";
 
 Deno.test("workflow parser normalizes Symphony-style local kanban config", () => {
@@ -85,6 +86,31 @@ Deno.test("setWorkflowMaxConcurrentAgents edits only that frontmatter line", () 
     assertStringIncludes(inserted, "# Custom body");
 
     assertThrows(() => setWorkflowMaxConcurrentAgents(root, 0));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("workflow useWorktrees defaults to true and round-trips through the setter", () => {
+  const root = Deno.makeTempDirSync({ prefix: "loopforge-workflow-" });
+  try {
+    assertEquals(readWorkflow(root).useWorktrees, true);
+    assertEquals(setWorkflowUseWorktrees(root, false).useWorktrees, false);
+    assertStringIncludes(Deno.readTextFileSync(`${root}/WORKFLOW.md`), "use_worktrees: false");
+    assertEquals(readWorkflow(root).useWorktrees, false);
+    assertEquals(setWorkflowUseWorktrees(root, true).useWorktrees, true);
+    assertEquals(readWorkflow(root).useWorktrees, true);
+
+    // Inserts under workspace: when a hand-edited file lost the line.
+    Deno.writeTextFileSync(
+      `${root}/WORKFLOW.md`,
+      "---\nversion: 1\nworkspace:\n  worktrees_dir: .loopforge/worktrees\n---\n# Custom body\n",
+    );
+    assertEquals(setWorkflowUseWorktrees(root, false).useWorktrees, false);
+    assertStringIncludes(
+      Deno.readTextFileSync(`${root}/WORKFLOW.md`),
+      "workspace:\n  use_worktrees: false\n  worktrees_dir:",
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

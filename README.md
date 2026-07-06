@@ -64,6 +64,12 @@ every backend:
 5. **Stop honestly.** If something truly needs you, the loop finishes **blocked** with one clear
    ask, never a raw log dump. Deleting a goal stops its loop cleanly, mid-turn.
 
+Worktrees are the default, not a requirement: flip **Isolated worktrees** off in the settings
+modal (per project, stored as `workspace.use_worktrees` in its `WORKFLOW.md`) and loops work
+directly in your project folder on your current branch instead. You own git in that mode - no
+LoopForge commits, branches, or merges - while probes still gate closure. Fan-out needs the
+isolation, so it sits out when worktrees are off.
+
 When a loop blocks, the thread shows exactly what happened and the composer becomes a steer box.
 Sending a message to a closed or blocked goal resumes it:
 
@@ -83,6 +89,9 @@ on the left, the board or the live thread in the center, detail / activity / dif
   silently. A checkbox asks clarifying questions first (like Codex plan mode) before planning.
 - **Live means live**: amber radar dots mark running work, the thread streams the agent's actual
   commands, and the diff panel shows the loop branch as it grows.
+- **Adding a project takes anything you paste**: a plain absolute path, `~/code/app`, a
+  `file://` link, shell quotes and trailing slashes included - parsed correctly whether the
+  server runs on Linux, macOS, or Windows. Or browse the filesystem with the folder button.
 - Two themes: Night Ops (dark) and Paper Terminal (light).
 
 <p align="center">

@@ -58,7 +58,31 @@ export function signalsComplete(responseText: string): boolean {
   return new RegExp(`^${LOOP_COMPLETE_TOKEN}\\b`, "m").test(responseText.trim());
 }
 
-export function loopPlanContract(maxParallel = 5): string {
+export function loopPlanContract(
+  maxParallel = 5,
+  opts: { worktrees?: boolean } = {},
+): string {
+  const worktrees = opts.worktrees ?? true;
+  // Without isolated worktrees there is no LoopForge-owned git and no safe
+  // parallelism, so the commit and fan-out clauses flip to their serial forms.
+  const gitClause = worktrees
+    ? "- Do not create commits; LoopForge commits the worktree after every turn."
+    : "- You are working directly in the user's project folder on their current branch. Do not\n" +
+      "  create commits or branches unless the goal explicitly asks for them; the user owns git here.";
+  const fanoutClause = worktrees
+    ? `- DEFAULT TO FAN-OUT. As soon as your plan has 2+ items that touch DIFFERENT files or areas
+  (disjoint write scopes, no shared files), your FIRST action is to delegate them to parallel
+  sub-agents - do NOT build independent pieces yourself one item per turn. Building things that
+  could run in parallel inline is the wrong default and wastes the loop. Spin up one sub-agent per
+  independent piece, up to ${maxParallel} at once, by ending your reply with:
+  ${LOOP_FANOUT_TOKEN}
+  {"subtasks":[{"title":"...","instruction":"...","writeScope":["src/api/**"]}, ...]}
+  Give each sub-agent a precise instruction and an exclusive writeScope. LoopForge runs them in
+  parallel in isolated worktrees, enforces the scopes, merges the results back, and reports a
+  summary on your next turn. Keep work inline ONLY when the remaining pieces genuinely share the
+  same files (a true conflict) or there is just one piece left.`
+    : "- Work the items yourself, serially. Parallel fan-out is unavailable for this project\n" +
+      "  (isolated worktrees are disabled).";
   return `Plan contract:
 - Track ALL work with the ./lf-task CLI at the worktree root:
   ./lf-task list | ./lf-task add "title" [--spec "one-line what/why/acceptance"] |
@@ -74,18 +98,8 @@ export function loopPlanContract(maxParallel = 5): string {
   evidence exists.
 - Record decisions, discoveries, and anything the next iteration must know with ./lf-task note.
   This plus the repo is your memory - ./lf-task list restores your state after any interruption.
-- Do not create commits; LoopForge commits the worktree after every turn.
-- DEFAULT TO FAN-OUT. As soon as your plan has 2+ items that touch DIFFERENT files or areas
-  (disjoint write scopes, no shared files), your FIRST action is to delegate them to parallel
-  sub-agents - do NOT build independent pieces yourself one item per turn. Building things that
-  could run in parallel inline is the wrong default and wastes the loop. Spin up one sub-agent per
-  independent piece, up to ${maxParallel} at once, by ending your reply with:
-  ${LOOP_FANOUT_TOKEN}
-  {"subtasks":[{"title":"...","instruction":"...","writeScope":["src/api/**"]}, ...]}
-  Give each sub-agent a precise instruction and an exclusive writeScope. LoopForge runs them in
-  parallel in isolated worktrees, enforces the scopes, merges the results back, and reports a
-  summary on your next turn. Keep work inline ONLY when the remaining pieces genuinely share the
-  same files (a true conflict) or there is just one piece left.
+${gitClause}
+${fanoutClause}
 - When every item is done and you believe the win conditions pass, end your reply with the
   single line ${LOOP_COMPLETE_TOKEN}.
 - Only when truly blocked by an absolute blocker (credentials, third-party access, destructive

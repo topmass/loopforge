@@ -185,6 +185,8 @@ export interface Runtime {
   scout?: { enabled: boolean; backend: string };
   pushBranches?: boolean;
   maxParallelAgents?: number;
+  // Per-project WORKFLOW.md settings the GUI edits (subset of readWorkflow).
+  workflow?: { maxConcurrentAgents?: number; useWorktrees?: boolean };
   // Per-project codex power (from readConfig) and the machine-wide Claude model,
   // so the settings modal can seed its "Model power" controls.
   config?: { model: string; reasoningEffort: string; fastMode: boolean };

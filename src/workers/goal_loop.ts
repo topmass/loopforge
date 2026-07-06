@@ -12,6 +12,7 @@ import { BoardStore } from "../board/store.ts";
 import { ActivityEvent, ActivityEventInput, Goal } from "../board/types.ts";
 import { autonomyContract, RunMode } from "../board/prompts.ts";
 import { readGlobalConfig } from "../board/global_config.ts";
+import { readWorkflow } from "../workflow/workflow.ts";
 import { createAgentClient } from "./agent_backend.ts";
 import { CodexClient, CodexSession } from "./codex_app_server.ts";
 import { isMissingCodexThreadText } from "./codex_event_normalizer.ts";
@@ -72,6 +73,10 @@ export class GoalLoopRunner {
     onEvent: (event: ActivityEventInput) => void,
   ) => CodexClient;
   private readonly runMode: RunMode;
+  // Per-project WORKFLOW.md workspace.use_worktrees, read at run start. False
+  // means the loop works directly in the project root: no loop branch, no
+  // auto-commits, no merge, and no fan-out (isolation is what makes those safe).
+  private useWorktrees = true;
 
   constructor(
     private readonly root: string,
@@ -95,29 +100,42 @@ export class GoalLoopRunner {
     for (const action of await ensureGitRepository(this.root)) {
       this.emitEvent(goalId, "git", action);
     }
-    const assignment = await prepareGoalWorktree(this.root, goalId);
-    this.store.setGoalLoopState(goalId, {
-      branch: assignment.branchName,
-      worktree: assignment.worktreePath,
-    });
+    this.useWorktrees = readWorkflow(this.root).useWorktrees;
+    const assignment = this.useWorktrees
+      ? await prepareGoalWorktree(this.root, goalId)
+      : { branchName: "", worktreePath: this.root };
+    this.store.setGoalLoopState(
+      goalId,
+      this.useWorktrees
+        ? { branch: assignment.branchName, worktree: assignment.worktreePath }
+        // Root mode: never store the project root as a "loop worktree" - the
+        // closure cleanup path reclaims stored worktrees, and the root must
+        // never be a reclaim candidate.
+        : { branch: null, worktree: null },
+    );
     // A previous goal's LOOP_PLAN.md (merged into main before the file became
     // untracked) must not seed this goal: it flips turn one into a continuation
     // prompt (no win conditions, no fan-out directive) and mirrors finished
     // items onto the new goal's board. Only a goal that never opened a loop
     // session resets; resumes keep their own plan.
     if (!goal.loopThreadId && await this.planFileExists(assignment.worktreePath)) {
-      await runCommand(assignment.worktreePath, [
-        "git",
-        "rm",
-        "--cached",
-        "--ignore-unmatch",
-        LOOP_PLAN_FILE,
-      ]).catch(() => {});
+      if (this.useWorktrees) {
+        await runCommand(assignment.worktreePath, [
+          "git",
+          "rm",
+          "--cached",
+          "--ignore-unmatch",
+          LOOP_PLAN_FILE,
+        ]).catch(() => {});
+      }
       await Deno.remove(path.join(assignment.worktreePath, LOOP_PLAN_FILE)).catch(() => {});
       // Commit the deletion NOW: once the path is out of HEAD, the fresh plan
       // the model writes is a new untracked path the exclude actually covers
       // (git re-tracks a recreated path that is still in HEAD, exclude or not).
-      await gitCommitAll(assignment.worktreePath, `${goalId} clear inherited ${LOOP_PLAN_FILE}`);
+      // Root mode leaves the user's git alone: removing the file is enough.
+      if (this.useWorktrees) {
+        await gitCommitAll(assignment.worktreePath, `${goalId} clear inherited ${LOOP_PLAN_FILE}`);
+      }
       this.emitEvent(
         goalId,
         "plan",
@@ -284,10 +302,13 @@ export class GoalLoopRunner {
           this.store.markGoalMessagesProcessed(queued.map((message) => message.id));
         }
 
-        const commit = await gitCommitAll(
-          assignment.worktreePath,
-          `${goalId} loop iteration ${iteration}`,
-        );
+        // Root mode never commits: the user owns git in their own checkout.
+        const commit = this.useWorktrees
+          ? await gitCommitAll(
+            assignment.worktreePath,
+            `${goalId} loop iteration ${iteration}`,
+          )
+          : null;
         // ./lf-task mutations already emitted plan.updated as they happened; the
         // shell only checks that file changes came with recorded task progress.
         // probeFeedback is empty here (reset before the turn), and every later
@@ -301,11 +322,14 @@ export class GoalLoopRunner {
         }
 
         if (wrapUp) {
+          const wrapped = this.useWorktrees
+            ? "wrapped up and committed in-progress work"
+            : "wrapped up in-progress work";
           const reason = wrapUp === "tokens"
-            ? "Token budget reached; wrapped up and committed in-progress work."
+            ? `Token budget reached; ${wrapped}.`
             : wrapUp === "time"
-            ? "Time budget reached; wrapped up and committed in-progress work."
-            : "Iteration budget reached; wrapped up and committed in-progress work.";
+            ? `Time budget reached; ${wrapped}.`
+            : `Iteration budget reached; ${wrapped}.`;
           return this.finish(goalId, iteration, "budget", reason);
         }
 
@@ -326,6 +350,12 @@ export class GoalLoopRunner {
         // Disjoint write scopes are enforced; the summary feeds the next turn.
         const fanout = parseFanoutRequest(responseText);
         if (fanout) {
+          if (!this.useWorktrees) {
+            probeFeedback =
+              "Fan-out requires isolated worktrees, which are disabled for this project " +
+              "(workspace.use_worktrees: false). Work the items serially.";
+            continue;
+          }
           const conflict = findScopeConflict(fanout);
           if (conflict) {
             probeFeedback =
@@ -395,7 +425,7 @@ export class GoalLoopRunner {
         // more independent items so the owner delegates instead of grinding
         // them one per turn.
         const todoCount = items.filter((item) => item.status === "todo").length;
-        if (!fanoutNudged && todoCount >= 2) {
+        if (this.useWorktrees && !fanoutNudged && todoCount >= 2) {
           fanoutNudged = true;
           probeFeedback =
             `Your plan still has ${todoCount} unchecked items. If two or more touch different files or areas, delegate them NOW with ${LOOP_FANOUT_TOKEN} and disjoint write scopes instead of working them one per turn. If they truly must be serial, say why in one line and continue.`;
@@ -445,13 +475,15 @@ export class GoalLoopRunner {
     reason: string,
   ): Promise<GoalLoopReport> {
     let evidence = summary.total
-      ? `Win conditions ${summary.passed}/${summary.total} passed in the loop worktree.`
+      ? `Win conditions ${summary.passed}/${summary.total} passed in the ${
+        this.useWorktrees ? "loop worktree" : "project root"
+      }.`
       : "No probes recorded; loop plan fully checked with evidence notes.";
     // A weak gate means the passing probes cannot prove the NEW work (none were
     // recorded, or every one was already green at baseline). Attended holds for
     // human review; unattended merges but flags the closure so the outcome does
     // not read as proven success.
-    if (weakGate && this.runMode === "attended") {
+    if (weakGate && this.runMode === "attended" && this.useWorktrees) {
       const prompt =
         `Loop complete, but ${reason}, so passing probes cannot prove the new work. Review the branch ${branchName} yourself, then restart this task and LoopForge merges immediately.`;
       const holdTask = this.store.createLoopMergeHoldTask(goalId, branchName, prompt, evidence);
@@ -475,7 +507,7 @@ export class GoalLoopRunner {
     const manualNotes = this.store.listLoopPlanItems(goalId)
       .map((item) => `${item.title}: ${item.note}`)
       .filter((line) => /needs manual verification/i.test(line));
-    if (this.runMode === "attended" && manualNotes.length) {
+    if (this.runMode === "attended" && manualNotes.length && this.useWorktrees) {
       const prompt = [
         "Loop complete and win conditions pass. Merge is held until you verify by hand:",
         ...manualNotes.map((note) => `- ${note}`),
@@ -488,6 +520,37 @@ export class GoalLoopRunner {
         `Loop work held in Review as ${holdTask.id} until manual verification.`,
       );
       return this.finish(goalId, iterations, "held", prompt);
+    }
+    // Root mode: the work already lives in the user's checkout - there is no
+    // branch to merge and nothing to hold. Close on the probe evidence, with
+    // manual-verification notes surfaced in the closure text instead of a hold.
+    if (!this.useWorktrees) {
+      if (manualNotes.length) {
+        evidence += ` Needs manual verification: ${manualNotes.join("; ")}`;
+      }
+      // The lf-task shim + goal pointer were planted in the user's root for
+      // this loop; a closed goal must not leave them behind (worktree mode
+      // reclaims them with the worktree).
+      await Deno.remove(path.join(this.root, "lf-task")).catch(() => {});
+      await Deno.remove(path.join(this.root, ".loopforge-goal.json")).catch(() => {});
+      for (
+        const event of this.store.settleGoalTasksForLoop(
+          goalId,
+          "Superseded by the goal loop; the loop completed this goal's work.",
+        )
+      ) {
+        this.emit(event);
+      }
+      const rootResult = this.store.closeGoal(goalId, evidence, { force: true });
+      this.emit(rootResult.event);
+      this.emit(this.store.appendLifecycleEvent({
+        kind: "goal.closed",
+        goalId,
+        taskId: null,
+        summary: evidence,
+        data: { branch: null, iterations },
+      }));
+      return this.finish(goalId, iterations, "complete", evidence);
     }
     let output: string;
     try {
@@ -609,7 +672,17 @@ plan yet. End your reply with a line containing only: LOOP_QUESTIONS`;
           ? `\n${preGreenCount} of ${probes.length} win conditions above already pass before any work. They are regression guards only: your evidence notes and plan items must prove the NEW work with checks that were failing before you did it.`
           : "")
       : "- none recorded; your evidence notes carry the proof.";
-    return `You are the LoopForge goal loop owner for ${goal.id}, working in this dedicated worktree until the goal is genuinely done.
+    const workplace = this.useWorktrees
+      ? "working in this dedicated worktree"
+      : "working directly in the project folder";
+    const begin = this.useWorktrees
+      ? `Begin now: break the goal into 3-10 concrete items with ./lf-task add "<title>" --spec "<one-line
+what/why/acceptance>". Then look at your plan - if it has 2+ items that touch different files or
+areas, immediately fan them out to parallel sub-agents (${LOOP_FANOUT_TOKEN}) this turn rather than
+building them yourself. Only build inline when there is a single piece or the pieces share files.`
+      : `Begin now: break the goal into 3-10 concrete items with ./lf-task add "<title>" --spec "<one-line
+what/why/acceptance>". Then work them one at a time, verifying each with real commands.`;
+    return `You are the LoopForge goal loop owner for ${goal.id}, ${workplace} until the goal is genuinely done.
 
 ${autonomyContract(this.runMode)}
 Goal:
@@ -622,12 +695,9 @@ ${probesBlock}
 Project context from the original folder:
 ${projectInstructions}
 
-${loopPlanContract(readGlobalConfig().maxParallelAgents)}
+${loopPlanContract(readGlobalConfig().maxParallelAgents, { worktrees: this.useWorktrees })}
 
-Begin now: break the goal into 3-10 concrete items with ./lf-task add "<title>" --spec "<one-line
-what/why/acceptance>". Then look at your plan - if it has 2+ items that touch different files or
-areas, immediately fan them out to parallel sub-agents (${LOOP_FANOUT_TOKEN}) this turn rather than
-building them yourself. Only build inline when there is a single piece or the pieces share files.`;
+${begin}`;
   }
 
   private buildContinuationPrompt(

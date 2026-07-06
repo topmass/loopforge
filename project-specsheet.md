@@ -111,6 +111,11 @@ LoopForge can also run as a server/API with the React GUI:
 - `/api/events` streams board/activity updates over SSE.
 - `/api/board`, `/api/runtime`, `/api/goals`, `/api/tasks`, `/api/agents/report`, and
   loop/scout/config endpoints are served from `src/web/server.ts`.
+- `POST /api/projects` and `GET /api/fs/dirs` route user paths through `parseFolderInput`
+  (`src/paths.ts`): trims quotes/whitespace, decodes `file://` links, expands `~`, accepts
+  Windows drive/UNC shapes only on Windows hosts (clear 400 otherwise), requires absolute paths.
+- `PATCH /api/workflow/workspace` takes `{useWorktrees: boolean}` and edits the project's
+  WORKFLOW.md (`setWorkflowUseWorktrees`); the GUI settings modal drives it.
 - `POST /api/goals/loop` takes `{text, hours, tokens, iterations, questionMode}` and starts a
   planned goal loop. One loop runs at a time per project (in-memory `goalLoopRunning` lock,
   released when the runner settles).
@@ -257,6 +262,15 @@ and merges/closes only when win conditions pass.
 
 Attended mode holds merge when manual verification notes exist. Unattended mode is used for timed
 runs and can merge with honest manual-verification notes recorded.
+
+Worktrees are per-project optional (`workspace.use_worktrees` in WORKFLOW.md, default true;
+GUI toggle "Isolated worktrees" via `PATCH /api/workflow/workspace`). When false the loop runs
+directly in the project root: no loop branch, no auto-commits, no merge, no worktree cleanup, and
+no fan-out (the plan contract flips to its serial form and a LOOP_FANOUT token gets a rejection
+feedback turn). Green probes close the goal with outcome `complete` ("passed in the project
+root"); attended merge-holds are skipped since there is nothing to merge - weak gates and
+manual-verification notes are appended to the closure text instead. Root mode never stores the
+project root as `loopWorktree` (the closure cleanup path reclaims stored worktrees).
 
 Loop outcomes are `complete | merged | held | blocked | budget | stalled | closed | deleted`.
 Deleting a goal mid-run stops its loop cleanly: the runner checks `store.goalExists()` at the top

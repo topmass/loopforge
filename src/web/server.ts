@@ -7,7 +7,7 @@ import {
   updateConfig,
 } from "../board/store.ts";
 import { ActivityEvent, ActivityEventInput, TaskStatus } from "../board/types.ts";
-import { normalizeRoot } from "../paths.ts";
+import { normalizeRoot, parseFolderInput } from "../paths.ts";
 import {
   CLAUDE_EFFORT_LEVELS,
   describeBackend,
@@ -34,7 +34,11 @@ import { GoalReviewer } from "../workers/goal_reviewer.ts";
 import { LoopForgeWorker } from "../workers/loopforge_worker.ts";
 import { buildProjectMemory } from "../workers/project_memory.ts";
 import { buildTaskCard, ensureProjectKnowledgeFiles } from "../workers/task_memory.ts";
-import { readWorkflow, setWorkflowMaxConcurrentAgents } from "../workflow/workflow.ts";
+import {
+  readWorkflow,
+  setWorkflowMaxConcurrentAgents,
+  setWorkflowUseWorktrees,
+} from "../workflow/workflow.ts";
 
 export interface LoopForgeServer {
   url: string;
@@ -311,12 +315,10 @@ export function startServer(
 
         if (url.pathname === "/api/projects" && request.method === "POST") {
           const body = await readJson<{ root?: string }>(request);
-          const target = body.root?.trim() ?? "";
-          if (!target) {
-            return json({ error: "root is required." }, 400);
-          }
+          // parseFolderInput handles pasted quotes, file:// links, ~, and
+          // trailing separators, and rejects foreign-platform path shapes.
           try {
-            registerProject(target);
+            registerProject(parseFolderInput(body.root ?? ""));
           } catch (error) {
             return json({ error: error instanceof Error ? error.message : String(error) }, 400);
           }
@@ -365,13 +367,18 @@ export function startServer(
         // filesystem through this read-only endpoint. Defaults to $HOME.
         if (url.pathname === "/api/fs/dirs" && request.method === "GET") {
           const raw = url.searchParams.get("path")?.trim();
-          const candidate = raw && raw.length
-            ? raw
-            : (Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "/");
-          if (!path.isAbsolute(candidate)) {
-            return json({ error: `${candidate} is not an absolute path.` }, 400);
+          // Typed/pasted browse paths get the same tolerant parse as project
+          // adds, so ~/code and file:// links work here too.
+          let target: string;
+          try {
+            target = parseFolderInput(
+              raw && raw.length
+                ? raw
+                : (Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "/"),
+            );
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 400);
           }
-          const target = path.normalize(candidate);
           let entries: Deno.DirEntry[];
           try {
             entries = [...Deno.readDirSync(target)];
@@ -803,6 +810,26 @@ export function startServer(
             ),
           );
           return json({ maxConcurrentAgents: workflow.maxConcurrentAgents });
+        }
+
+        if (url.pathname === "/api/workflow/workspace" && request.method === "PATCH") {
+          const body = await readJson<{ useWorktrees?: boolean }>(request);
+          if (typeof body.useWorktrees !== "boolean") {
+            return json({ error: "useWorktrees must be a boolean." }, 400);
+          }
+          const workflow = setWorkflowUseWorktrees(normalizedRoot, body.useWorktrees);
+          broadcastActivity(
+            store.appendEvent(
+              null,
+              null,
+              "core",
+              "config",
+              workflow.useWorktrees
+                ? "Isolated worktrees enabled."
+                : "Isolated worktrees disabled - goal loops run in the project root.",
+            ),
+          );
+          return json({ useWorktrees: workflow.useWorktrees });
         }
 
         if (url.pathname === "/api/config" && request.method === "PATCH") {

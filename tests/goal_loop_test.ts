@@ -2,6 +2,7 @@ import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/
 import { BoardStore } from "../src/board/store.ts";
 import { GoalLoopRunner } from "../src/workers/goal_loop.ts";
 import { LoopForgeWorker } from "../src/workers/loopforge_worker.ts";
+import { setWorkflowUseWorktrees } from "../src/workflow/workflow.ts";
 import type {
   CodexClient,
   CodexSession,
@@ -316,6 +317,57 @@ Deno.test("goal loop stops with outcome deleted when the goal is removed mid-run
     const report = await runner.run(goal.id);
     assertEquals(report.outcome, "deleted");
     assertEquals(client!.turns, 2);
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("goal loop with worktrees disabled runs in the project root and closes without merging", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  setWorkflowUseWorktrees(root, false);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  const cwds: string[] = [];
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Root mode widget");
+    store.addProbes(goal.id, [{ label: "widget exists", command: "test -f widget.txt" }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd, _turn) => {
+          cwds.push(cwd);
+          const item = store.addLoopPlanItem(goal.id, "Create the widget");
+          store.setLoopPlanItemStatus(goal.id, item.id, "done", "wrote widget.txt");
+          await Deno.writeTextFile(`${cwd}/widget.txt`, "widget\n");
+          return "Created the widget.\nLOOP_COMPLETE";
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    assertEquals(report.outcome, "complete");
+    assertStringIncludes(report.detail, "project root");
+    // The session worked directly in the project root, never a worktree.
+    assert(cwds.length > 0 && cwds.every((cwd) => cwd === root));
+    // The contract flips to its serial form: no fan-out, user owns git.
+    assertStringIncludes(client!.prompts[0], "Parallel fan-out is unavailable");
+    assertStringIncludes(client!.prompts[0], "the user owns git here");
+    // No loop branch and no LoopForge commits in the user's repo.
+    assertEquals((await gitOutput(root, ["branch", "--list", "loopforge/*"])).trim(), "");
+    const log = await gitOutput(root, ["log", "--format=%s"]);
+    assert(!log.includes(goal.id), `expected no loop commits, got:\n${log}`);
+    // The goal closed and the work stayed in the working tree.
+    assertEquals(store.getGoal(goal.id).status, "closed");
+    assert(await Deno.stat(`${root}/widget.txt`).then(() => true).catch(() => false));
+    // The lf-task shim and goal pointer were reclaimed from the user's root.
+    assert(!(await Deno.stat(`${root}/lf-task`).then(() => true).catch(() => false)));
+    assert(!(await Deno.stat(`${root}/.loopforge-goal.json`).then(() => true).catch(() => false)));
+    // Root mode never records the project root as a reclaimable loop worktree.
+    assertEquals(store.getGoal(goal.id).loopWorktree ?? null, null);
   } finally {
     store.close();
     await Deno.remove(root, { recursive: true });
