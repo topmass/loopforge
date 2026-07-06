@@ -2,7 +2,7 @@
 
 LoopForge durable project memory and implementation map.
 
-Last checked: 2026-06-15.
+Last checked: 2026-07-06.
 
 ## Current Status
 
@@ -10,9 +10,11 @@ Last checked: 2026-06-15.
 - Local repo path is still `/home/topmass/Code/goalforge`.
 - Git remote is `https://github.com/topmass/loopforge.git`.
 - `./loopforge` is the primary launcher. `./goalforge` remains a compatibility alias.
-- Git HEAD and `origin/main` are synced at `fa5cc42`; the current working tree may contain
-  in-progress specsheet edits.
-- `deno task test` passed on 2026-07-02 with 287 tests.
+- Git HEAD and `origin/main` are synced at `0b6943a`.
+- `deno task test` passed on 2026-07-06 with 288 tests.
+- The React GUI under `app/` is the primary graphical interface, served at `/app/` by
+  `loopforge serve`. The legacy server-rendered `static/` GUI was deleted; `/` now 302-redirects
+  to `/app/` and unknown paths 404.
 - `pnpm run smoke:opentui` currently fails in older mouse-coordinate phases, while the scroll,
   review, and dogfood phases pass. Treat the OpenTUI smoke harness as needing maintenance after
   recent layout changes.
@@ -100,12 +102,21 @@ The primary user experience is a terminal command center:
 - `loopforge tui --native` uses the Deno-native fallback renderer.
 - `loopforge -C <path> ...` runs any command against another project directory.
 
-LoopForge can also run as a server/API:
+LoopForge can also run as a server/API with the React GUI:
 
-- `loopforge serve --port 4733`
+- `loopforge serve --port 4733` starts a hub plus per-project child servers (children run in the
+  same Deno process; killing it kills all of them). Binds 127.0.0.1 with localhost-only CORS.
+- `/` 302-redirects to `/app/`, which serves the built React GUI from `app/dist` (gitignored;
+  build with `pnpm build` inside `app/`). Files are read per request, so a rebuild shows on
+  browser refresh without a server restart.
 - `/api/events` streams board/activity updates over SSE.
 - `/api/board`, `/api/runtime`, `/api/goals`, `/api/tasks`, `/api/agents/report`, and
   loop/scout/config endpoints are served from `src/web/server.ts`.
+- `POST /api/goals/loop` takes `{text, hours, tokens, iterations, questionMode}` and starts a
+  planned goal loop. One loop runs at a time per project (in-memory `goalLoopRunning` lock,
+  released when the runner settles).
+- `POST /api/goals/:id/task` steers an open goal's loop and resumes a closed goal server-side.
+- `DELETE /api/goals/:id` deletes a goal; a running loop notices within one turn (see Goal Loop).
 
 ## Runtime and Storage
 
@@ -254,6 +265,11 @@ and merges/closes only when win conditions pass.
 Attended mode holds merge when manual verification notes exist. Unattended mode is used for timed
 runs and can merge with honest manual-verification notes recorded.
 
+Loop outcomes are `complete | merged | held | blocked | budget | stalled | closed | deleted`.
+Deleting a goal mid-run stops its loop cleanly: the runner checks `store.goalExists()` at the top
+of each iteration and after each turn, and a 500ms watch during `runTurn` calls the backend's
+optional `interruptTurn` so the in-flight turn aborts instead of running to completion.
+
 ### Pursue
 
 `loopforge pursue` keeps working goals over a time budget:
@@ -296,6 +312,44 @@ OpenTUI command center:
 
 Scrollable panels use native OpenTUI `onMouseScroll` handlers and retain per-panel offsets across
 refreshes. PageUp/PageDown are decoded as fallback scroll keys.
+
+## React GUI (app/)
+
+The GUI is a Vite + React 19 app in `app/` (build with `pnpm build` inside `app/`; output in
+`app/dist` is gitignored and served by `loopforge serve` at `/app/`).
+
+Stack and layout:
+
+- Tailwind v4 CSS-first design tokens in `app/src/index.css`. Two themes: Paper Terminal (light)
+  and Night Ops (dark, the flagship default), switched via `data-theme` on `<html>` and persisted
+  as `lf-theme` in localStorage.
+- Three panels in `app/src/App.tsx`: `Sidebar` (projects + loops), center `CenterTabs`
+  (`BoardView` Kanban / `ThreadView` transcript), right `RightPanel` (Detail / Activity / Diff).
+  `ChatBar` is the global composer at the bottom.
+- State is one zustand store (`app/src/store.ts`) fed by a single SSE connection to `/api/events`
+  plus REST calls (`app/src/api.ts`). Board and all views project the same state.
+- Status/liveness vocabulary lives in the `STATUS` map in `app/src/components/ui.ts`; live things
+  get the amber `radar-dot` (keyframes in `index.css`). No left-border accent stripes on cards -
+  state is signaled with STATUS dots and surface/shadow shifts.
+
+Loop-scoped board and composer targets:
+
+- The sidebar has an "All loops" row plus one row per goal. Selecting a goal scopes the Kanban to
+  that loop's own To Do / Doing / Done; "All loops" shows the unified board grouped by goal.
+- `ChatBar` takes the active goal and renders explicit target chips: "New loop" vs
+  "GOAL-N - add task/resume". Sends dispatch through `useChatSend().send(value, target)` with
+  `SendTarget = {kind: "new", ask?} | {kind: "goal", id}`. Adding to a closed goal resumes it
+  server-side; nothing is targeted silently.
+- Selection stickiness (`applyBoard` in `store.ts`): a selected loop stays selected while the goal
+  exists (closed goals are valid selections); auto-focus of the first open goal happens only on
+  the very first board snapshot or when the selection was deleted; an explicit "All" (null)
+  choice sticks.
+
+Rules:
+
+- zustand selectors must never return fresh arrays/objects (React error #185 infinite rerender).
+  Select stable references and apply fallbacks like `?? []` outside the selector.
+- Frontend ownership: app/src is authored by Claude/Opus under review, never delegated to codex.
 
 ## External Agent Hooks
 
