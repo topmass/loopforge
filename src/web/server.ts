@@ -908,7 +908,22 @@ export function startServer(
         const checkMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/check$/);
         if (checkMatch && request.method === "POST") {
           const goalId = decodeURIComponent(checkMatch[1]);
-          const summary = await runGoalProbes(normalizedRoot, store, goalId);
+          // A running loop re-checks probes itself every turn; a concurrent
+          // manual run could collide with it (port-binding probes especially).
+          if (goalLoopRunning) {
+            return json({
+              error: "A goal loop is running; it re-checks win conditions every turn.",
+            }, 409);
+          }
+          // Probes must run where the work actually is: an unmerged loop's
+          // worktree when one exists, the project root otherwise. Running a
+          // blocked goal's probes in the root would show false reds.
+          let cwd = normalizedRoot;
+          const loopWorktree = store.getGoal(goalId).loopWorktree;
+          if (loopWorktree && dirExists(loopWorktree)) {
+            cwd = loopWorktree;
+          }
+          const summary = await runGoalProbes(normalizedRoot, store, goalId, cwd);
           broadcastBoard();
           return json({
             goalId,
@@ -916,6 +931,75 @@ export function startServer(
             passed: summary.passed,
             probes: store.listProbes(goalId),
           });
+        }
+
+        // Probe editing: the planner writes win conditions, but a broken probe
+        // (bad quoting is the classic) must be repairable from the GUI without
+        // touching the database by hand.
+        const probesAddMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/probes$/);
+        if (probesAddMatch && request.method === "POST") {
+          const goalId = decodeURIComponent(probesAddMatch[1]);
+          const body = await readJson<{ label?: string; command?: string }>(request);
+          const label = body.label?.trim() ?? "";
+          const command = body.command?.trim() ?? "";
+          if (!label || !command) {
+            return json({ error: "label and command are required." }, 400);
+          }
+          try {
+            store.getGoal(goalId);
+          } catch {
+            return json({ error: `${goalId} not found.` }, 404);
+          }
+          store.addProbes(goalId, [{ label, command }]);
+          broadcastActivity(
+            store.appendEvent(null, null, "core", "probes", `${goalId}: probe added: ${label}`),
+          );
+          broadcastBoard();
+          return json({ probes: store.listProbes(goalId) }, 201);
+        }
+
+        const probeMatch = url.pathname.match(/^\/api\/probes\/(\d+)$/);
+        if (probeMatch && request.method === "PATCH") {
+          const probeId = Number(probeMatch[1]);
+          const body = await readJson<
+            { label?: string; command?: string; expectContains?: string | null }
+          >(request);
+          try {
+            const probe = store.updateProbe(probeId, body);
+            broadcastActivity(
+              store.appendEvent(
+                null,
+                null,
+                "core",
+                "probes",
+                `${probe.goalId}: probe edited: ${probe.label}`,
+              ),
+            );
+            broadcastBoard();
+            return json({ probe });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return json({ error: message }, message.includes("not found") ? 404 : 400);
+          }
+        }
+        if (probeMatch && request.method === "DELETE") {
+          const probeId = Number(probeMatch[1]);
+          const existing = store.getProbe(probeId);
+          if (!existing) {
+            return json({ error: `Probe ${probeId} not found.` }, 404);
+          }
+          store.deleteProbe(probeId);
+          broadcastActivity(
+            store.appendEvent(
+              null,
+              null,
+              "core",
+              "probes",
+              `${existing.goalId}: probe deleted: ${existing.label}`,
+            ),
+          );
+          broadcastBoard();
+          return json({ ok: true });
         }
 
         const pursueMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/pursue$/);

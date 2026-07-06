@@ -116,6 +116,15 @@ LoopForge can also run as a server/API with the React GUI:
   Windows drive/UNC shapes only on Windows hosts (clear 400 otherwise), requires absolute paths.
 - `PATCH /api/workflow/workspace` takes `{useWorktrees: boolean}` and edits the project's
   WORKFLOW.md (`setWorkflowUseWorktrees`); the GUI settings modal drives it.
+- Probe editing: `PATCH /api/probes/:id` (label/command/expectContains; editing the check resets
+  the row to pending), `DELETE /api/probes/:id`, `POST /api/goals/:id/probes` (add). The GUI
+  win-conditions strip toggles `ProbePanel` (list, edit, add, delete, re-run). `POST
+  /api/goals/:id/check` runs probes in the goal's loop worktree when one exists (root otherwise)
+  and 409s while a loop is running (the loop re-checks every turn itself).
+- Probe safety (found by adversarial testing 2026-07-06): probes run under `setsid` and timeouts
+  kill the whole process group, or orphaned background servers (http.server probes) squat on
+  ports and poison later runs; `runGoalProbes` discards results for probes edited mid-run
+  (counted not-passed that run, never recorded) and drops deleted probes without crashing.
 - `POST /api/goals/loop` takes `{text, hours, tokens, iterations, questionMode}` and starts a
   planned goal loop. One loop runs at a time per project (in-memory `goalLoopRunning` lock,
   released when the runner settles).

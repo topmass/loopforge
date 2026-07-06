@@ -7,6 +7,7 @@ import type { PlanStep } from "../types";
 import { STATUS, spring } from "./ui";
 import { LineMark } from "./marks";
 import { GoalStrip } from "./GoalStrip";
+import { ProbePanel } from "./ProbePanel";
 
 // A tiny muted pill tagging which goal a board card belongs to, shown only when
 // more than one goal is open (a single open goal needs no disambiguation).
@@ -88,6 +89,8 @@ export function BoardView() {
   // before the first board snapshot arrives.
   const probes = useStore((s) => s.board?.probes) ?? [];
   const selectTask = useStore((s) => s.selectTask);
+  // Win-conditions editor visibility (scoped goal only).
+  const [probesOpen, setProbesOpen] = useState(false);
 
   const goals = board?.goals ?? [];
   const openGoals = goals.filter((g) => g.status === "open");
@@ -150,10 +153,16 @@ export function BoardView() {
       <GoalStrip />
       {(goalProbes.length > 0 || showLoopStatus) && (
         <div className="flex items-baseline gap-3 border-b border-line px-4 py-2 text-xs text-ink-muted">
-          {goalProbes.length > 0 && (
-            <span className="shrink-0">
-              Win conditions: {passed}/{goalProbes.length} passing
-            </span>
+          {activeGoalId && (
+            <button
+              type="button"
+              onClick={() => setProbesOpen(!probesOpen)}
+              className="shrink-0 transition-colors hover:text-ink"
+              title="Edit win conditions"
+            >
+              Win conditions: {passed}/{goalProbes.length} passing{" "}
+              <span className="text-ink-faint">{probesOpen ? "▾" : "▸"}</span>
+            </button>
           )}
           {showLoopStatus && loopStatus && (
             <span className="min-w-0 truncate text-ink-faint" title={loopStatus.reason}>
@@ -163,6 +172,13 @@ export function BoardView() {
             </span>
           )}
         </div>
+      )}
+      {probesOpen && activeGoalId && (
+        <ProbePanel
+          goalId={activeGoalId}
+          probes={goalProbes}
+          loopLive={statusActiveAt !== undefined && Date.now() - statusActiveAt < 120_000}
+        />
       )}
       <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
       {/* Parallel sub-agents as a live strip - lit while coding, calm when merged. */}

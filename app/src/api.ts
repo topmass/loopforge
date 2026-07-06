@@ -9,6 +9,7 @@ import type {
   GoalDiff,
   GoalThread,
   LifecycleEvent,
+  Probe,
   ProjectEntry,
   Runtime,
 } from "./types";
@@ -164,6 +165,24 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ useWorktrees }),
     }),
+  // Win-condition editing: repair a planner-written probe (bad quoting is the
+  // classic), add or remove one, and re-run the checks on demand.
+  updateProbe: (id: number, patch: { label?: string; command?: string }) =>
+    jsonFetch<{ probe: Probe }>(`/api/probes/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteProbe: (id: number) => jsonFetch<{ ok: boolean }>(`/api/probes/${id}`, { method: "DELETE" }),
+  addProbe: (goalId: string, label: string, command: string) =>
+    jsonFetch<{ probes: Probe[] }>(`/api/goals/${goalId}/probes`, {
+      method: "POST",
+      body: JSON.stringify({ label, command }),
+    }),
+  checkGoal: (goalId: string) =>
+    jsonFetch<{ goalId: string; total: number; passed: number; probes: Probe[] }>(
+      `/api/goals/${goalId}/check`,
+      { method: "POST" },
+    ),
   // Per-project codex power knobs: model, reasoning effort, fast mode. The
   // runtime line picks the new values up on the modal's refresh.
   setConfig: (patch: { model?: string; reasoningEffort?: string; fastMode?: boolean }) =>

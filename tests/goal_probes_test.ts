@@ -92,3 +92,41 @@ Deno.test("lessons store dedupes and caps text", () => {
     Deno.removeSync(root, { recursive: true });
   }
 });
+
+Deno.test("a timed-out probe cannot orphan the background processes it spawned", async () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  // Unique marker so pgrep can only match this test's process tree.
+  const marker = `lf-orphan-${Date.now()}`;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Orphan reaper");
+    store.addProbes(goal.id, [{
+      label: "spawns a background server then hangs",
+      command: `bash -c 'exec -a ${marker} sleep 60' & trap "kill $!" EXIT; sleep 60`,
+      timeoutMs: 800,
+    }]);
+    const summary = await runGoalProbes(root, store, goal.id);
+    assertEquals(summary.passed, 0);
+    // The group kill must have reaped the background child, not just bash:
+    // SIGKILL bypasses trap-EXIT, so without the group this process leaks.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const check = await new Deno.Command("pgrep", {
+      args: ["-f", marker],
+      stdout: "piped",
+      stderr: "null",
+    }).output();
+    const survivors = new TextDecoder().decode(check.stdout).trim();
+    if (survivors) {
+      for (const pid of survivors.split("\n")) {
+        try {
+          Deno.kill(Number(pid), "SIGKILL");
+        } catch { /* already gone */ }
+      }
+    }
+    assertEquals(survivors, "");
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});

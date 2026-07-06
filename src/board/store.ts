@@ -811,6 +811,47 @@ export class BoardStore {
     ).run(status, limitText(output, 4000), timestamp(), probeId);
   }
 
+  getProbe(probeId: number): GoalProbe | null {
+    const row = this.db.prepare("SELECT * FROM goal_probes WHERE id = ?").get(probeId);
+    return row ? probeFromRow(row as SqlRow) : null;
+  }
+
+  // Editing the check itself invalidates its last result: a changed command or
+  // expectation resets the probe to pending so a stale green/red never lies.
+  updateProbe(
+    probeId: number,
+    patch: { label?: string; command?: string; expectContains?: string | null },
+  ): GoalProbe {
+    const existing = this.getProbe(probeId);
+    if (!existing) {
+      throw new Error(`Probe ${probeId} not found.`);
+    }
+    const label = patch.label !== undefined ? patch.label.trim() : existing.label;
+    const command = patch.command !== undefined ? patch.command.trim() : existing.command;
+    if (!label || !command) {
+      throw new Error("A probe needs a non-empty label and command.");
+    }
+    const expect = patch.expectContains !== undefined
+      ? (patch.expectContains?.trim() || null)
+      : existing.expectContains;
+    const checkChanged = command !== existing.command || expect !== existing.expectContains;
+    if (checkChanged) {
+      this.db.prepare(
+        "UPDATE goal_probes SET label = ?, command = ?, expect_contains = ?, last_status = 'pending', last_output = '', last_run_at = NULL WHERE id = ?",
+      ).run(label, command, expect, probeId);
+    } else {
+      this.db.prepare("UPDATE goal_probes SET label = ? WHERE id = ?").run(label, probeId);
+    }
+    return this.getProbe(probeId)!;
+  }
+
+  deleteProbe(probeId: number): void {
+    if (!this.getProbe(probeId)) {
+      throw new Error(`Probe ${probeId} not found.`);
+    }
+    this.db.prepare("DELETE FROM goal_probes WHERE id = ?").run(probeId);
+  }
+
   addLesson(text: string, source = ""): Lesson {
     const trimmed = text.replace(/\s+/g, " ").trim().slice(0, 400);
     if (!trimmed) {

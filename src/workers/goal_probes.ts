@@ -28,8 +28,26 @@ export async function runGoalProbes(
   const results: ProbeRunResult[] = [];
   for (const probe of probes) {
     const result = await runProbeCommand(cwd, probe);
-    store.recordProbeResult(probe.id, result.passed ? "passed" : "failed", result.output);
-    results.push({ ...result, probe: store.listProbes(goalId).find((p) => p.id === probe.id)! });
+    // Probes are editable from the GUI while a run is in flight. Only record
+    // the result if the check is still the one we actually ran: an edit mid-
+    // run reset the row to pending (don't stamp a stale verdict on the new
+    // command), a deleted row drops out of the summary entirely, and an
+    // edited probe counts as not-passed this run so a stale green can never
+    // satisfy the completion gate before the new command has actually run.
+    const current = store.getProbe(probe.id);
+    if (!current) {
+      continue;
+    }
+    if (current.command === probe.command && current.expectContains === probe.expectContains) {
+      store.recordProbeResult(probe.id, result.passed ? "passed" : "failed", result.output);
+      results.push({ ...result, probe: store.getProbe(probe.id) ?? probe });
+    } else {
+      results.push({
+        probe: current,
+        passed: false,
+        output: "Probe was edited while this run was in flight; result discarded.",
+      });
+    }
   }
   return {
     total: results.length,
@@ -38,18 +56,47 @@ export async function runGoalProbes(
   };
 }
 
+// setsid puts each probe in its own process group so a timeout can reap
+// everything the probe spawned: SIGKILL on bash alone bypasses trap-EXIT
+// cleanup and orphans background servers, which then squat on their ports and
+// poison every later run. Cached probe; falls back to plain bash (macOS).
+let setsidAvailable: boolean | null = null;
+function hasSetsid(): boolean {
+  if (setsidAvailable === null) {
+    try {
+      new Deno.Command("setsid", { args: ["true"], stdout: "null", stderr: "null" }).outputSync();
+      setsidAvailable = true;
+    } catch {
+      setsidAvailable = false;
+    }
+  }
+  return setsidAvailable;
+}
+
 async function runProbeCommand(
   root: string,
   probe: GoalProbe,
 ): Promise<{ probe: GoalProbe; passed: boolean; output: string }> {
   try {
-    const child = new Deno.Command("bash", {
-      args: ["-lc", probe.command],
+    const grouped = hasSetsid();
+    const child = new Deno.Command(grouped ? "setsid" : "bash", {
+      args: grouped ? ["bash", "-lc", probe.command] : ["-lc", probe.command],
       cwd: root,
       stdout: "piped",
       stderr: "piped",
     }).spawn();
-    const timer = setTimeout(() => child.kill("SIGKILL"), probe.timeoutMs);
+    const timer = setTimeout(() => {
+      if (grouped) {
+        // Session leader: pgid == pid, so the negative pid kills the group.
+        try {
+          new Deno.Command("bash", { args: ["-c", `kill -9 -- -${child.pid}`] }).outputSync();
+        } catch {
+          child.kill("SIGKILL");
+        }
+      } else {
+        child.kill("SIGKILL");
+      }
+    }, probe.timeoutMs);
     const output = await child.output();
     clearTimeout(timer);
     const text = [

@@ -1679,3 +1679,80 @@ Deno.test("server returns a goal's per-loop diff for a live branch", async () =>
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test("server edits, adds, deletes, and re-runs probes in the loop worktree", async () => {
+  const root = Deno.makeTempDirSync();
+  const worktree = Deno.makeTempDirSync();
+  await Deno.writeTextFile(`${worktree}/marker.txt`, "here\n");
+  const boot = new BoardStore(root);
+  let goalId = "";
+  let probeId = 0;
+  try {
+    boot.initProject();
+    const { goal } = boot.createGoal("Probe editing over HTTP");
+    goalId = goal.id;
+    // Broken-quoting stand-in: a probe that can never pass as written.
+    const [probe] = boot.addProbes(goal.id, [{ label: "broken", command: "test -f nope.txt" }]);
+    probeId = probe.id;
+    // The unmerged work lives in the loop worktree; checks must run there.
+    boot.setGoalLoopState(goal.id, { worktree, branch: "loopforge/goal-test" });
+  } finally {
+    boot.close();
+  }
+
+  const port = 52133 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    // Repair the command (the GUI's Save): result resets to pending.
+    const patched = await fetch(`${server.url}/api/probes/${probeId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ command: "test -f marker.txt" }),
+    }).then((r) => r.json());
+    assertEquals(patched.probe.command, "test -f marker.txt");
+    assertEquals(patched.probe.lastStatus, "pending");
+
+    // Re-run: passes only because the check runs in the loop worktree.
+    const checked = await fetch(`${server.url}/api/goals/${goalId}/check`, { method: "POST" })
+      .then((r) => r.json());
+    assertEquals(checked.passed, 1);
+    assertEquals(checked.total, 1);
+
+    // Add and delete round-trip.
+    const added = await fetch(`${server.url}/api/goals/${goalId}/probes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "second", command: "true" }),
+    });
+    assertEquals(added.status, 201);
+    const { probes } = await added.json();
+    assertEquals(probes.length, 2);
+    const secondId = probes.find((p: { label: string }) => p.label === "second").id;
+    const removed = await fetch(`${server.url}/api/probes/${secondId}`, { method: "DELETE" })
+      .then((r) => r.json());
+    assertEquals(removed.ok, true);
+
+    // Missing rows are 404s, bad payloads are 400s.
+    const ghost = await fetch(`${server.url}/api/probes/99999`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "x" }),
+    });
+    assertEquals(ghost.status, 404);
+    await ghost.json();
+    const empty = await fetch(`${server.url}/api/goals/${goalId}/probes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "", command: "" }),
+    });
+    assertEquals(empty.status, 400);
+    await empty.json();
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+    await Deno.remove(worktree, { recursive: true }).catch(() => {});
+  }
+});

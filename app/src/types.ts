@@ -79,10 +79,15 @@ export interface Task {
 }
 
 export interface Probe {
-  id: string;
+  id: number;
   goalId: string;
   label: string;
+  command: string;
+  expectContains: string | null;
+  timeoutMs: number;
   lastStatus: string;
+  lastOutput: string;
+  lastRunAt: string | null;
 }
 
 export interface ActivityEvent {

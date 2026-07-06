@@ -919,3 +919,36 @@ Deno.test("deleted goal ids are not reused", () => {
     Deno.removeSync(root, { recursive: true });
   }
 });
+
+Deno.test("updateProbe edits reset the result only when the check itself changes", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Probe editing");
+    const [probe] = store.addProbes(goal.id, [{ label: "widget", command: "test -f widget.txt" }]);
+    store.recordProbeResult(probe.id, "failed", "boom");
+
+    // Label-only edits keep the recorded result.
+    const relabeled = store.updateProbe(probe.id, { label: "widget exists" });
+    assertEquals(relabeled.label, "widget exists");
+    assertEquals(relabeled.lastStatus, "failed");
+    assertEquals(relabeled.lastOutput, "boom");
+
+    // A repaired command invalidates the stale result.
+    const repaired = store.updateProbe(probe.id, { command: "test -f fixed.txt" });
+    assertEquals(repaired.command, "test -f fixed.txt");
+    assertEquals(repaired.lastStatus, "pending");
+    assertEquals(repaired.lastOutput, "");
+
+    assertThrows(() => store.updateProbe(probe.id, { command: "  " }));
+    assertThrows(() => store.updateProbe(9999, { label: "ghost" }));
+
+    store.deleteProbe(probe.id);
+    assertEquals(store.listProbes(goal.id).length, 0);
+    assertThrows(() => store.deleteProbe(probe.id));
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});

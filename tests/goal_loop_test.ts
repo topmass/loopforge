@@ -367,6 +367,50 @@ Deno.test("shell-run probes nudge an undeclared loop and close it on the second 
   }
 });
 
+Deno.test("a probe repaired mid-loop is picked up by the shell check and closes the goal", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Fix the probe while the loop runs");
+    // The planner wrote a probe that can never pass (the quoting-bug shape).
+    const [probe] = store.addProbes(goal.id, [
+      { label: "widget exists", command: "test -f nope-wrong-file.txt" },
+    ]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd, turn) => {
+          if (turn === 1) {
+            const item = store.addLoopPlanItem(goal.id, "Create the widget");
+            store.addLoopPlanItem(goal.id, "Verify everything thoroughly");
+            store.setLoopPlanItemStatus(goal.id, item.id, "done", "wrote widget.txt");
+            await Deno.writeTextFile(`${cwd}/widget.txt`, "widget\n");
+          }
+          if (turn === 2) {
+            // The user repairs the broken probe from the GUI mid-run.
+            store.updateProbe(probe.id, { command: "test -f widget.txt" });
+          }
+          return "Still grinding on verification.";
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    // Turn 1: probe red (broken command). Turn 2: repaired -> shell check goes
+    // green and nudges. Turn 3: still green, still no declaration -> closed.
+    assertEquals(report.outcome, "merged");
+    assertEquals(client!.turns, 3);
+    assertEquals(store.getGoal(goal.id).status, "closed");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("goal loop with worktrees disabled runs in the project root and closes without merging", async () => {
   const root = Deno.makeTempDirSync();
   await seedRepo(root);
