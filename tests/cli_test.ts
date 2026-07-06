@@ -191,7 +191,12 @@ Deno.test("CLI help documents main ensure", async () => {
     const stdout = new TextDecoder().decode(output.stdout);
     assertStringIncludes(stdout, 'loopforge build "<goal text>"');
     assertStringIncludes(stdout, "loopforge main status|ensure|reset|absorb");
-    assertStringIncludes(stdout, "loopforge dogfood [--live] [--keep]");
+    assertStringIncludes(stdout, "loopforge dogfood [--keep]");
+    assertStringIncludes(stdout, "loopforge gui [--port 4733] [--no-open]");
+    assertStringIncludes(
+      stdout,
+      "Running loopforge with no command serves the GUI and opens your browser.",
+    );
     assertStringIncludes(stdout, "loopforge doctor");
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -228,7 +233,7 @@ Deno.test("CLI main status includes project health guidance", async () => {
     assertStringIncludes(stdout, "Project health: Needs Project Memory");
     assertStringIncludes(
       stdout,
-      "Next: Open the TUI or run `loopforge main ensure` to create project memory.",
+      "Next: Open the GUI or run `loopforge main ensure` to create project memory.",
     );
   } finally {
     try {
@@ -262,7 +267,6 @@ Deno.test("CLI doctor reports local prerequisites", async () => {
     const stdout = new TextDecoder().decode(output.stdout);
     assertStringIncludes(stdout, "Deno runtime");
     assertStringIncludes(stdout, "Git");
-    assertStringIncludes(stdout, "Bun");
     assertStringIncludes(stdout, "uv");
     assertStringIncludes(stdout, "Python 3");
     assertStringIncludes(stdout, "Doctor:");

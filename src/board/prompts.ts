@@ -83,7 +83,7 @@ Loop states:
 - Repairing: queued input or failed evidence is being addressed.
 - Reviewing: LoopForge is reviewing, committing, or merging.
 - Remembering: durable project memory is being updated.
-- Blocked: the TUI must show the exact needed input or blocker.
+- Blocked: the board must show the exact needed input or blocker.
 - Done: the task is merged and absorbed into memory.
 
 Agents report workpad notes in their final handoff. The daemon records those notes on the board. If an agent is busy, incoming requests are queued as board events instead of interrupting its current task.

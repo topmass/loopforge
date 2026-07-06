@@ -175,7 +175,7 @@ function healthNextAction(
   goal: ReturnType<typeof summarizeGoalProgress>,
 ): string {
   if (!board.projectState.mainThreadId) {
-    return "Open the TUI or run `loopforge main ensure` to create project memory.";
+    return "Open the GUI or run `loopforge main ensure` to create project memory.";
   }
   if (board.agentStatuses.some((status) => status.risk === "stale")) {
     return "Inspect stale active agents before starting more work.";

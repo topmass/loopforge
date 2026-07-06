@@ -82,7 +82,7 @@ Deno.test("task CLI adds, starts, and completes a loop plan item with --root/--g
     assertStringIncludes(done.stdout, `done ${id}`);
 
     // The evidence lands in the item note, and the final plan.updated lifecycle
-    // event mirrors the final state so the GUI/TUI need no CLI-specific logic.
+    // event mirrors the final state so the GUI needs no CLI-specific logic.
     const reopened = new BoardStore(root);
     try {
       const items = reopened.listLoopPlanItems(goalId);

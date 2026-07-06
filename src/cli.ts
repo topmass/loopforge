@@ -10,7 +10,6 @@ import {
 import { summarizeGoalProgress } from "./board/goal_progress.ts";
 import { normalizeRoot, runtimeDirName, workflowPath } from "./paths.ts";
 import { startServer } from "./web/server.ts";
-import { runCommandCenterTui } from "./tui/command_center.ts";
 import { ensureGitRepository, gitMergeBranch } from "./workers/git_utils.ts";
 import { GoalPlanner } from "./workers/goal_planner.ts";
 import { runScout } from "./workers/goal_scout.ts";
@@ -63,16 +62,6 @@ try {
       break;
     case "gui":
       await guiCommand(args);
-      break;
-    case "tui":
-      await tuiCommand(args);
-      break;
-    case "command-center":
-    case "native-tui":
-      await runCommandCenterTui(root, args);
-      break;
-    case "opentui":
-      await openTuiCommand(args);
       break;
     case "status":
       statusCommand();
@@ -402,54 +391,6 @@ async function serveCommand(args: string[]): Promise<void> {
   const server = startServer(root, port);
   console.log(`Open ${server.url}`);
   await server.finished;
-}
-
-async function openTuiCommand(args: string[]): Promise<void> {
-  const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
-  const port = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
-  if (!Number.isInteger(port) || port < 1) {
-    throw new Error("A valid --port value is required.");
-  }
-  const bun = resolveExecutable("bun", [homePath(".bun/bin/bun")]);
-  if (!bun) {
-    console.error("loopforge: Bun was not found. Falling back to native TUI.");
-    await runCommandCenterTui(root, stripPortArgs(args, portArgIndex));
-    return;
-  }
-  const store = new BoardStore(root);
-  try {
-    store.initProject();
-    await ensureGitRepository(root);
-  } finally {
-    store.close();
-  }
-  const server = startServer(root, port);
-  const forwardedArgs = stripPortArgs(args, portArgIndex);
-  const status = await new Deno.Command(bun, {
-    args: [
-      new URL("./tui/opentui_client.ts", import.meta.url).pathname,
-      "--url",
-      server.url,
-      ...forwardedArgs,
-    ],
-    cwd: root,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  }).spawn().status;
-  server.shutdown();
-  await server.finished.catch(() => {});
-  if (!status.success) {
-    throw new Error(`OpenTUI exited with code ${status.code}.`);
-  }
-}
-
-async function tuiCommand(args: string[]): Promise<void> {
-  if (args.includes("--native")) {
-    await runCommandCenterTui(root, args.filter((arg) => arg !== "--native"));
-    return;
-  }
-  await openTuiCommand(args);
 }
 
 async function hooksCommand(args: string[]): Promise<void> {
@@ -984,19 +925,13 @@ function applyBackendFlags(rawArgs: string[]): string[] {
   return remaining;
 }
 
-function stripPortArgs(args: string[], portArgIndex: number): string[] {
-  return portArgIndex >= 0
-    ? args.filter((_, index) => index !== portArgIndex && index !== portArgIndex + 1)
-    : args;
-}
-
 function normalizeArgs(args: string[]): [string | undefined, ...string[]] {
   const first = args[0];
   if (first === undefined) {
-    return ["tui"];
+    return ["gui"];
   }
   if (first.startsWith("-") && first !== "-h" && first !== "--help") {
-    return ["tui", ...args];
+    return ["gui", ...args];
   }
   return [first, ...args.slice(1)];
 }
@@ -1469,33 +1404,7 @@ function healthCommand(): void {
 }
 
 async function dogfoodCommand(args: string[]): Promise<void> {
-  if (args.includes("--live")) {
-    await liveDogfoodCommand(args);
-    return;
-  }
-  const python = resolveExecutable("python3", []);
-  if (!python) {
-    throw new Error("python3 is required to run the LoopForge dogfood gate.");
-  }
-  const script = new URL("../scripts/smoke_opentui_tui.py", import.meta.url).pathname;
-  const loopforgeBin = new URL("../loopforge", import.meta.url).pathname;
-  const repo = new URL("../", import.meta.url).pathname.replace(/\/$/, "");
-  console.log("Running LoopForge dogfood readiness gate...");
-  const status = await new Deno.Command(python, {
-    args: [script, "--dogfood-only"],
-    cwd: repo,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-    env: {
-      LOOPFORGE_REPO: repo,
-      LOOPFORGE_BIN: loopforgeBin,
-    },
-  }).spawn().status;
-  if (!status.success) {
-    throw new Error(`LoopForge dogfood gate failed with code ${status.code}.`);
-  }
-  console.log("LoopForge dogfood readiness gate passed.");
+  await liveDogfoodCommand(args);
 }
 
 async function liveDogfoodCommand(args: string[]): Promise<void> {
@@ -1538,12 +1447,6 @@ function doctorCommand(): void {
       missingNote: "install git before running task worktrees",
     },
     {
-      label: "Bun",
-      path: resolveExecutable("bun", [homePath(".bun/bin/bun")]),
-      okNote: "OpenTUI command center enabled",
-      missingNote: "native fallback TUI will be used",
-    },
-    {
       label: "uv",
       path: resolveExecutable("uv", [homePath(".local/bin/uv"), homePath(".cargo/bin/uv")]),
       okNote: "Codex Python bridge can launch",
@@ -1567,17 +1470,17 @@ function doctorCommand(): void {
   console.log(
     config.rescue.enabled
       ? `rescue: ${config.rescue.backend} reviews stuck tasks after ${config.rescue.afterAttempts} failed attempts`
-      : "rescue: off (arm with --rescue codex or the TUI Rescue button)",
+      : "rescue: off (arm with --rescue codex or the GUI model settings)",
   );
   console.log(
     config.planner.enabled
       ? `planner: ${config.planner.backend} compiles and replans goals`
-      : "planner: off (route with --planner codex or the TUI Planner button)",
+      : "planner: off (route with --planner codex or the GUI model settings)",
   );
   console.log(
     config.scout.enabled
       ? `scout: ${config.scout.backend} proposes ideas (you approve or reject them)`
-      : "scout: off (arm with --scout codex or the TUI Scout button)",
+      : "scout: off (arm with --scout codex or the GUI model settings)",
   );
   console.log(
     config.search.endpoint
@@ -1587,7 +1490,7 @@ function doctorCommand(): void {
   const missingRequired = checks.filter((check) => check.label === "Git" && !check.path);
   for (const check of checks) {
     const ok = check.ok ?? Boolean(check.path);
-    const status = ok ? "ok" : check.label === "Bun" ? "fallback" : "missing";
+    const status = ok ? "ok" : "missing";
     const detail = ok
       ? `${check.path ?? "available"} - ${check.note ?? check.okNote}`
       : check.missingNote;
@@ -1630,10 +1533,8 @@ Usage:
   loopforge review TASK-ID
   loopforge delete TASK-ID
   loopforge message TASK-ID "<message>"
-  loopforge serve [--port 4733]
-  loopforge tui [--native]
-  loopforge opentui [--port 4733]
-  loopforge board [--port 4733]
+  loopforge gui [--port 4733] [--no-open]   # serve + open the browser (the default)
+  loopforge serve [--port 4733]             # serve only, no browser
   loopforge merge TASK-ID
   loopforge main status|ensure|reset|absorb
   loopforge task TASK-ID [card|threads]
@@ -1643,7 +1544,7 @@ Usage:
   loopforge close-goal [GOAL-ID]
   loopforge goals
   loopforge health
-  loopforge dogfood [--live] [--keep]
+  loopforge dogfood [--keep]
   loopforge doctor
   loopforge status
   loopforge hooks [print | install claude | install codex]
@@ -1667,12 +1568,12 @@ Agent backend (any command, saved to ~/.loopforge/config.json):
                               Any OpenAI-compatible endpoint via pi
                               (llama.cpp, LM Studio, vLLM, Ollama; remembers URL)
 
-Rescue model (saved; also a toggle button in the TUI footer):
+Rescue model (saved; also in the GUI model settings):
   --rescue <codex|claude|local|pi|off>   Stronger model reviews stuck tasks and
                                          tells the worker how to fix them
   --rescue-after N                       Failed attempts before it chimes in (default 2)
 
-Planner model (saved; also a toggle button in the TUI footer):
+Planner model (saved; also in the GUI model settings):
   --planner <codex|claude|local|pi|off>  Route goal planning and pursue replans to a
                                          stronger model while workers stay on the
                                          main backend
@@ -1683,6 +1584,6 @@ Scout (saved; proposes ideas, you stay the gatekeeper):
   --search <url|off>                     SearXNG-style endpoint agents use for web
                                          searches via curl (works on every backend)
 
-Running loopforge with no command opens the TUI.
+Running loopforge with no command serves the GUI and opens your browser.
 `);
 }

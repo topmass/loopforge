@@ -146,7 +146,7 @@ Deno.test("health lines name the main ensure remediation when memory is missing"
     assertStringIncludes(text, "Main memory: not started");
     assertStringIncludes(
       text,
-      "Next: Open the TUI or run `loopforge main ensure` to create project memory.",
+      "Next: Open the GUI or run `loopforge main ensure` to create project memory.",
     );
   } finally {
     store.close();

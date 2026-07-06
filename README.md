@@ -34,11 +34,11 @@ ln -s "$PWD/loopforge" ~/.local/bin/loopforge   # any directory on your PATH
 cd app && pnpm install && pnpm build && cd ..   # one-time: build the GUI
 ```
 
-Then point it at any project and open the command center:
+Then point it at any project and just run it:
 
 ```bash
 cd ~/code/my-project
-loopforge serve            # GUI at http://127.0.0.1:4733
+loopforge                  # serves the GUI and opens your browser
 ```
 
 Type a goal into the composer, press **Start**, and watch the board fill in. The first run
@@ -73,7 +73,7 @@ Sending a message to a closed or blocked goal resumes it:
 
 ## The command center
 
-`loopforge serve` runs a hub with per-project boards. The GUI is three panels: projects and loops
+`loopforge` runs a hub with per-project boards. The GUI is three panels: projects and loops
 on the left, the board or the live thread in the center, detail / activity / diff on the right.
 
 - **Each loop is its own board.** Select a loop in the sidebar for its scoped
@@ -89,9 +89,7 @@ on the left, the board or the live thread in the center, detail / activity / dif
   <img src=".github/board-light.png" alt="The same live board in the Paper Terminal light theme" width="100%">
 </p>
 
-Prefer the terminal? The same board runs as a TUI: `loopforge` with no command opens it
-(optional [Bun](https://bun.sh) enables the full OpenTUI command center; without it a native
-fallback renders). Every GUI action has a CLI equivalent:
+Every GUI action has a CLI equivalent (`loopforge serve` runs the same server headless):
 
 ```bash
 loopforge loop "add a dark mode toggle with tests"   # one step: plan it, then loop it

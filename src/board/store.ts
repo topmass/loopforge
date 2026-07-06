@@ -1000,9 +1000,9 @@ export class BoardStore {
   }
 
   // First-class loop-plan API for the `loopforge task` CLI. Items are the SAME
-  // kind="loop" tasks syncLoopPlanTasks mirrors, so the TUI and existing queries
+  // kind="loop" tasks syncLoopPlanTasks mirrors, so the GUI and existing queries
   // keep working; every mutation re-emits the whole plan as one plan.updated
-  // lifecycle event so the GUI/TUI update live with no per-mutation logic.
+  // lifecycle event so the GUI updates live with no per-mutation logic.
   addLoopPlanItem(goalId: string, title: string, spec = ""): Task {
     this.getOpenGoal(goalId);
     const trimmed = title.trim();
@@ -1135,7 +1135,7 @@ export class BoardStore {
   }
 
   // After any loop-plan mutation: one plan.updated lifecycle event carrying the
-  // whole current step list (the shape the GUI/TUI already read), plus one
+  // whole current step list (the shape the GUI already reads), plus one
   // compact activity line for the human log.
   private emitLoopPlanUpdate(goalId: string, taskRef: string, summary: string): void {
     const steps: PlanStep[] = this.listLoopPlanItems(goalId).map((item) => ({

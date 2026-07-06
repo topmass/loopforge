@@ -1,7 +1,7 @@
 // AgentClient backed by the pi coding agent's RPC mode (`pi --mode rpc`,
 // JSONL over stdio). One pi subprocess per client; pi's session files act as
 // thread ids. Pi events are translated into the Codex event vocabulary so the
-// normalizer, live supervisor, activity feed, and TUI work unchanged.
+// normalizer, live supervisor, and activity feed work unchanged.
 
 import {
   CodexClient,

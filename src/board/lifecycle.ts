@@ -1,7 +1,7 @@
 // The canonical orchestration event vocabulary - LoopForge's backend-independent
 // observability contract. Every engine (the goal loop, the relay worker, the
 // fan-out pool, and adapters that ingest native Codex/Claude runs) emits these
-// same typed events, so one model feeds the TUI today and a web Kanban later.
+// same typed events, so one model feeds the GUI board, thread, and node views.
 //
 // Lifecycle events ride the existing ActivityEvent stream: role is always
 // LIFECYCLE_ROLE, kind is the canonical LifecycleKind, message is the human

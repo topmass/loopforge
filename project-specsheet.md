@@ -11,13 +11,11 @@ Last checked: 2026-07-06.
 - Git remote is `https://github.com/topmass/loopforge.git`.
 - `./loopforge` is the primary launcher. `./goalforge` remains a compatibility alias.
 - Git HEAD and `origin/main` are synced at `0b6943a`.
-- `deno task test` passed on 2026-07-06 with 288 tests.
-- The React GUI under `app/` is the primary graphical interface, served at `/app/` by
-  `loopforge serve`. The legacy server-rendered `static/` GUI was deleted; `/` now 302-redirects
-  to `/app/` and unknown paths 404.
-- `pnpm run smoke:opentui` currently fails in older mouse-coordinate phases, while the scroll,
-  review, and dogfood phases pass. Treat the OpenTUI smoke harness as needing maintenance after
-  recent layout changes.
+- `deno task test` passed on 2026-07-06 with 263 tests.
+- The React GUI under `app/` is the only interface, served at `/app/` by the server. Bare
+  `loopforge` serves it and opens the browser. The legacy server-rendered `static/` GUI and the
+  entire terminal command center (`src/tui/`, OpenTUI, Bun dependency, smoke harness) were
+  deleted; `/` now 302-redirects to `/app/` and unknown paths 404.
 - Current board health reports Needs Attention because old open smoke/publish goals remain with no
   tasks or evidence gaps. Code health and Git sync are separate from this board hygiene issue.
 
@@ -74,8 +72,8 @@ LoopForge is not yet the same as Codex's native subagent workflow:
   agents.
 - The relay path runs parallel LoopForge task workers, but those workers are board tasks, not
   visible Codex subagent threads managed under one parent turn.
-- The TUI can show LoopForge workers, external hook reports, and task/goal activity, but it does not
-  yet render Codex-native child agent threads as children of a specific goal.
+- The GUI can show LoopForge workers, external hook reports, and task/goal activity, but it does
+  not yet render Codex-native child agent threads as children of a specific goal.
 - Current external hook ingestion ignores `SubagentStart` and `SubagentStop`, so native Codex
   subagent lifecycle is not yet visible as goal-child activity.
 - The activity feed intentionally filters raw agent deltas, so it gives an overview rather than a
@@ -85,8 +83,8 @@ Future subagent alignment should preserve LoopForge as the visible goal tracker 
 do native delegation where it is strongest. A practical design is: one LoopForge goal owns the
 parent Codex thread and worktree, LoopForge passes explicit "spawn agents in parallel" instructions
 only for independent investigation or implementation slices, the bridge records subagent/thread
-lifecycle events when the SDK exposes them, and the board maps those child agents into Active Agents
-and Agent Flow without forcing every child into a separate task card. Keep board tasks for durable
+lifecycle events when the SDK exposes them, and the board maps those child agents into the GUI's
+sub-agent nodes without forcing every child into a separate task card. Keep board tasks for durable
 planning, evidence, review, merge, and retries.
 
 ## Product Summary
@@ -95,12 +93,13 @@ LoopForge is a local-first coding-agent orchestration tool. It keeps a SQLite Ka
 target project, plans rough goals, runs agents in isolated git worktrees, supervises live activity,
 verifies evidence, reviews, merges, and closes goals only when completion proof exists.
 
-The primary user experience is a terminal command center:
+The primary user experience is the GUI:
 
-- `loopforge` with no command opens the TUI.
-- `loopforge tui` starts the OpenTUI command center through Bun when available.
-- `loopforge tui --native` uses the Deno-native fallback renderer.
+- `loopforge` with no command serves the GUI and opens the browser (`guiCommand`: picks the next
+  free port when 4733 is busy; `--no-open` suppresses the browser).
 - `loopforge -C <path> ...` runs any command against another project directory.
+- The terminal command center (OpenTUI/native TUI) was removed 2026-07-06; there is no `tui`,
+  `opentui`, or `command-center` command anymore.
 
 LoopForge can also run as a server/API with the React GUI:
 
@@ -177,7 +176,8 @@ CLI and launch:
 - `loopforge` is the shell launcher.
 - `goalforge` is the compatibility wrapper.
 - `deno.json` defines `loopforge`, `check`, `fmt`, `lint`, and `test` tasks.
-- `package.json` defines OpenTUI smoke/dogfood scripts using `pnpm`.
+- `package.json` only carries the dogfood script and `@types/node`; the GUI has its own
+  `app/package.json`.
 
 Board and status:
 
@@ -196,16 +196,9 @@ Workflow config:
 - `WORKFLOW.md` controls max agents, retry policy, backend defaults, worktree dir, hooks, GitHub PR
   review, and authority for publish/triage.
 
-Server and TUI:
+Server:
 
-- `src/web/server.ts` is the local API/SSE server.
-- `src/tui/opentui_client.ts` is the Bun/OpenTUI command center.
-- `src/tui/command_center.ts` is the Deno-native fallback TUI.
-- `src/tui/activity.ts` formats visible activity and filters raw agent noise.
-- `src/tui/task_recommendation.ts` formats the selected task's next action.
-- `src/tui/choreography.ts` diffs board state into visual flow events.
-- `src/tui/flow_field.ts` renders the Agent Flow particle band.
-- `src/tui/input.ts` normalizes prompt input and control keys.
+- `src/web/server.ts` is the local API/SSE server (and serves the React GUI at `/app/`).
 
 Workers and agents:
 
@@ -294,25 +287,6 @@ is ahead, pushes, verifies ahead/behind counts, and writes parser-compatible val
 
 Publishing is controlled by `authority.publish` in `WORKFLOW.md`.
 
-## TUI Behavior
-
-OpenTUI command center:
-
-- Task rail groups active/ready, needs input, done, and ideas.
-- Task Details shows recommendation, validation, activity, worktree/thread info, handoff, and
-  evidence.
-- Active Agents shows current worker/external-agent status.
-- Project Memory shows project health, active goal, closed goals, contracts, probes, and manual
-  verification items.
-- Activity is an overview, not a raw transcript. Raw `codex` and `main-thread` agent text deltas are
-  filtered from display.
-- Agent Flow is a particle band driven by board diffs and external-agent reports; `p` toggles it.
-- Footer has create/run actions, board operations, and config toggles for Rescue, Planner, Scout,
-  and agent count.
-
-Scrollable panels use native OpenTUI `onMouseScroll` handlers and retain per-panel offsets across
-refreshes. PageUp/PageDown are decoded as fallback scroll keys.
-
 ## React GUI (app/)
 
 The GUI is a Vite + React 19 app in `app/` (build with `pnpm build` inside `app/`; output in
@@ -360,8 +334,8 @@ External coding agents can report into the board:
 - `loopforge hooks install codex`
 
 Hooks call `scripts/hooks/loopforge_agent_hook.py`, which posts to `/api/agents/report`. Reports
-outside the active project root are ignored. External agents appear in Active Agents, Activity, and
-Agent Flow.
+outside the active project root are ignored. External agents appear in the GUI activity feed and
+agent status.
 
 ## Autonomy and Blockers
 
@@ -443,17 +417,10 @@ Other useful checks:
 ```bash
 /home/topmass/.deno/bin/deno task check
 /home/topmass/.deno/bin/deno fmt --check
-pnpm run smoke:opentui
-pnpm run dogfood:opentui
-./loopforge dogfood --live
+./loopforge dogfood
 ./loopforge doctor
 ./loopforge health
 ```
-
-Current caveat: `pnpm run smoke:opentui` is not green as of 2026-06-14 because old mouse-coordinate
-expectations do not match the current TUI layout. Do not treat the OpenTUI smoke as passing until
-those harness phases are repaired. The scroll, review, and dogfood smoke phases did pass during the
-latest check.
 
 ## Current Board Hygiene
 
@@ -469,20 +436,15 @@ Recommended cleanup:
 
 - Close or delete old 0-task smoke goals if they are no longer useful.
 - Repair or clear `GOAL-7` so health stops pointing at stale publish evidence gaps.
-- Repair the OpenTUI smoke harness after TUI layout changes.
 
 ## Rules for Future Changes
 
 - Keep repo-local durable behavior in this file when a feature is confirmed working.
 - Keep broad historical notes in the vault, but this specsheet should explain how LoopForge works
   now.
-- Update shared formatters/helpers instead of one-off TUI copies:
-  - activity: `src/tui/activity.ts`
-  - task recommendation: `src/tui/task_recommendation.ts`
+- Update shared formatters/helpers instead of one-off copies:
   - status/health: `src/board/status_lines.ts`
   - goal progress/evidence: `src/board/goal_progress.ts`
-- When task statuses or board types change, check OpenTUI manually because
-  `src/tui/opentui_client.ts` is exercised mainly through smoke tests rather than `deno check`.
 - Do not mutate `.loopforge/board.sqlite` directly in normal work. Use `BoardStore`, CLI commands,
   or server APIs.
 - Never filter streamed agent text deltas with `trim()` in bridge emit paths - whitespace-only

@@ -41,7 +41,7 @@ and merge work.
 ## Loop Contract
 Every task moves through a durable loop:
 Queued -> Planning -> Working -> Testing -> Repairing -> Reviewing -> Remembering -> Done.
-Blocked means LoopForge has a concrete blocker or user decision to show in the TUI.
+Blocked means LoopForge has a concrete blocker or user decision to show on the board.
 Each phase should preserve the current gate, next action, verification summary, and any needed input.
 
 ## Workpad Contract

@@ -1357,7 +1357,7 @@ export function startServer(
         const stopMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/stop$/);
         if (stopMatch && request.method === "POST") {
           const taskId = decodeURIComponent(stopMatch[1]);
-          const event = store.requestTaskStop(taskId, "Stop requested from the LoopForge TUI.");
+          const event = store.requestTaskStop(taskId, "Stop requested from the LoopForge GUI.");
           broadcastActivity(event);
           return json({ ok: true, taskId, event });
         }
