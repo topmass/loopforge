@@ -409,6 +409,16 @@ export class BoardStore {
     return (rows as SqlRow[]).map(frontMessageFromRow);
   }
 
+  // Compaction cursor: the last front message id folded into the resume
+  // capsule. Everything after it is "uncompacted tail".
+  getFrontCompactCursor(): number {
+    return Number(this.getProjectValue("front_last_compact_id") ?? 0);
+  }
+
+  setFrontCompactCursor(messageId: number): void {
+    this.setProjectValue("front_last_compact_id", String(messageId));
+  }
+
   // Monotonic ledger revision: the max event id. Front reads stamp answers
   // with this so "as of when?" is always answerable.
   eventRevision(): number {

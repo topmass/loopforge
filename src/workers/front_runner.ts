@@ -14,6 +14,7 @@ import { createAgentClient } from "./agent_backend.ts";
 import { CodexClient, CodexSession } from "./codex_app_server.ts";
 import { isMissingCodexThreadText } from "./codex_event_normalizer.ts";
 import { probeLights } from "./goal_probes.ts";
+import { contextPath } from "../paths.ts";
 
 export interface FrontRunnerOptions {
   onEvent?: (event: ActivityEventInput & { taskId: string | null; runId: string | null }) => void;
@@ -87,14 +88,65 @@ export class FrontRunner {
       }
       const { reply, action } = this.applyActions(responseText.trim());
       const finalText = action ? `${reply}\n\n${action}`.trim() : reply;
-      return this.store.appendFrontMessage(
+      const message = this.store.appendFrontMessage(
         "front",
         finalText || "(no reply)",
         this.store.getFrontThreadId() ?? undefined,
       );
+      // Idle compaction (thread-first step 9): turns serialize, so right after
+      // a turn IS idle. Summaries are rebuildable caches, never truth - the
+      // raw transcript and the ledger stay authoritative in SQLite.
+      await this.maybeCompact(client).catch(() => {});
+      return message;
     } finally {
       await client.stop().catch(() => {});
     }
+  }
+
+  // Compact when the uncompacted tail passes 12 messages or ~24k characters:
+  // regenerate the deterministic resume capsule, advance the cursor, then let
+  // the backend fold its own context (optional; not every backend supports it).
+  private async maybeCompact(client: CodexClient): Promise<void> {
+    const cursor = this.store.getFrontCompactCursor();
+    const tail = this.store.listFrontMessages({ afterId: cursor, limit: 1000 });
+    const chars = tail.reduce((total, message) => total + message.message.length, 0);
+    if (tail.length < 12 && chars < 24_000) {
+      return;
+    }
+    this.writeResumeCapsule();
+    this.store.setFrontCompactCursor(tail[tail.length - 1].id);
+    const threadId = this.store.getFrontThreadId();
+    if (threadId && client.compactThread) {
+      await client.compactThread({ threadId, cwd: this.root }).catch(() => {});
+    }
+  }
+
+  // The resume capsule is generated purely from the ledger + transcript tail:
+  // no model turn, always rebuildable, safe to lose. Authoritative human
+  // instructions (AGENTS.md, WORKFLOW.md, project-specsheet.md) are never
+  // touched by compaction.
+  private writeResumeCapsule(): void {
+    const capsule = [
+      "# LoopForge resume capsule",
+      "",
+      "Generated automatically after front-thread compaction. A rebuildable",
+      "cache of ledger state - do not edit by hand; authoritative instructions",
+      "live in AGENTS.md / WORKFLOW.md / project-specsheet.md.",
+      "",
+      `Updated: ${new Date().toISOString()}`,
+      "",
+      "## Project ledger",
+      this.buildLedgerDigest(),
+      "",
+      "## Recent conversation tail",
+      ...this.store.listFrontMessages({ limit: 8 }).map((message) =>
+        `- ${message.role}: ${message.message.split("\n")[0].slice(0, 160)}`
+      ),
+      "",
+    ].join("\n");
+    const target = contextPath(this.root, "current-state.md");
+    Deno.mkdirSync(contextPath(this.root), { recursive: true });
+    Deno.writeTextFileSync(target, capsule);
   }
 
   private async openFrontSession(client: CodexClient): Promise<CodexSession> {
