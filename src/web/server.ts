@@ -669,11 +669,17 @@ export function startServer(
               broadcastBoard();
             }).catch((error) => {
               const detail = error instanceof Error ? error.message : String(error);
-              const failed = store.appendFrontMessage(
-                "front",
-                `[front turn failed: ${detail.slice(0, 200)}]`,
-              );
-              broadcast("front", failed);
+              // Never let the failure path throw (e.g. a store torn down at
+              // shutdown): an uncaught rejection here would kill the process.
+              try {
+                const failed = store.appendFrontMessage(
+                  "front",
+                  `[front turn failed: ${detail.slice(0, 200)}]`,
+                );
+                broadcast("front", failed);
+              } catch {
+                // shutting down; nothing to record against
+              }
             });
           });
           return json({ message, revision: store.eventRevision() }, 201);

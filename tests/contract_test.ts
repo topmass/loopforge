@@ -5,6 +5,44 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { startServer } from "../src/web/server.ts";
 import { BoardStore } from "../src/board/store.ts";
+import type {
+  CodexClient,
+  CodexSession,
+  CodexTurnInput,
+  CodexTurnResult,
+} from "../src/workers/codex_app_server.ts";
+
+// Contract tests never exercise a real backend: a stub that completes every
+// turn instantly keeps front-turn side effects deterministic.
+class StubClient implements CodexClient {
+  constructor(
+    private readonly onEvent: (event: {
+      taskId: string | null;
+      runId: string | null;
+      role: string;
+      kind: string;
+      message: string;
+    }) => void,
+  ) {}
+  startSession(cwd: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId: "stub-thread", cwd });
+  }
+  resumeSession(cwd: string, threadId: string): Promise<CodexSession> {
+    return Promise.resolve({ threadId, cwd });
+  }
+  runTurn(session: CodexSession, _input: CodexTurnInput): Promise<CodexTurnResult> {
+    this.onEvent({ taskId: null, runId: null, role: "codex", kind: "agent", message: "ok" });
+    return Promise.resolve({
+      threadId: session.threadId,
+      turnId: "stub-turn",
+      status: "completed",
+      completed: true,
+    });
+  }
+  stop(): Promise<void> {
+    return Promise.resolve();
+  }
+}
 
 // -- Frozen shapes ------------------------------------------------------------
 
@@ -87,7 +125,9 @@ Deno.test("contract: board snapshot and runtime keep their frozen keys", async (
   }
 
   const port = 52933 + Math.floor(Math.random() * 300);
-  const server = startServer(root, port);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new StubClient(onEvent),
+  });
   try {
     const board = await fetch(`${server.url}/api/board`).then((r) => r.json());
     assertHasKeys(board, BOARD_KEYS, "board snapshot");
@@ -217,7 +257,9 @@ Deno.test("front thread: status and message endpoints answer from the ledger", a
   }
 
   const port = 53233 + Math.floor(Math.random() * 300);
-  const server = startServer(root, port);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new StubClient(onEvent),
+  });
   try {
     const status = await fetch(`${server.url}/api/front/status`).then((r) => r.json());
     assert(typeof status.revision === "number");
@@ -234,9 +276,16 @@ Deno.test("front thread: status and message endpoints answer from the ledger", a
     const { message } = await posted.json();
     assertEquals(message.role, "user");
 
-    const listed = await fetch(`${server.url}/api/front/messages`).then((r) => r.json());
-    assertEquals(listed.messages.length, 1);
+    // Posting stores the user message AND triggers a front turn (stubbed
+    // here); the reply lands asynchronously after it.
+    let listed = await fetch(`${server.url}/api/front/messages`).then((r) => r.json());
+    for (let index = 0; index < 50 && listed.messages.length < 2; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      listed = await fetch(`${server.url}/api/front/messages`).then((r) => r.json());
+    }
     assertEquals(listed.messages[0].message, "status?");
+    assertEquals(listed.messages[0].role, "user");
+    assert(listed.messages.some((m: { role: string }) => m.role === "front"));
 
     const empty = await fetch(`${server.url}/api/front/messages`, {
       method: "POST",
