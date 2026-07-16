@@ -35,6 +35,7 @@ import {
 } from "./fanout.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
 import { writeTaskWorkspace } from "./task_workspace.ts";
+import { withRepoLock } from "./repo_coordinator.ts";
 import {
   extractBlockedAsk,
   LOOP_PLAN_FILE,
@@ -103,7 +104,12 @@ export class GoalLoopRunner {
     }
     this.useWorktrees = readWorkflow(this.root).useWorktrees;
     const assignment = this.useWorktrees
-      ? await prepareGoalWorktree(this.root, goalId)
+      ? await withRepoLock(
+        this.store,
+        this.root,
+        "goal-worktree",
+        () => prepareGoalWorktree(this.root, goalId),
+      )
       : { branchName: "", worktreePath: this.root };
     this.store.setGoalLoopState(
       goalId,
@@ -676,7 +682,12 @@ export class GoalLoopRunner {
     // one worktree + branch per finished goal.
     const worktree = this.store.getGoal(goalId).loopWorktree;
     if (worktree) {
-      await removeTaskWorktree(this.root, worktree, branchName);
+      await withRepoLock(
+        this.store,
+        this.root,
+        "goal-reclaim",
+        () => removeTaskWorktree(this.root, worktree, branchName),
+      );
       this.store.setGoalLoopState(goalId, { threadId: null, branch: null, worktree: null });
     }
     return this.finish(goalId, iterations, "merged", closure);

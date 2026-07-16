@@ -285,7 +285,7 @@ Deno.test("gitMergeBranchLeased times out without merging when the lease is held
     await assertRejects(
       () => gitMergeBranchLeased(store, root, "feature", { timeoutMs: 300, pollMs: 50 }),
       Error,
-      `Timed out waiting for the merge:${root} lease.`,
+      `Timed out waiting for the repository lock (merge on ${root}).`,
     );
     // Never acquired, so never merged and never released.
     assertEquals(store.released, false);

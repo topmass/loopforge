@@ -18,6 +18,7 @@ import {
   runCommand,
 } from "./git_utils.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
+import { withRepoLock } from "./repo_coordinator.ts";
 
 export const LOOP_FANOUT_TOKEN = "LOOP_FANOUT";
 
@@ -191,7 +192,12 @@ export class FanoutRunner {
       }));
       this.reportAgent(subId, sub.title, "working", `Starting: ${sub.title}`);
       try {
-        const assignment = await prepareFanoutWorktree(this.root, loopBranch, subId);
+        const assignment = await withRepoLock(
+          this.store,
+          this.root,
+          "fanout-worktree",
+          () => prepareFanoutWorktree(this.root, loopBranch, subId),
+        );
         this.reportAgent(
           subId,
           sub.title,
@@ -362,7 +368,12 @@ export class FanoutRunner {
           data: { title: done.sub.title, branch: done.branch },
         }));
         // Reclaim the merged sub-worktree so rounds do not accumulate them.
-        await removeTaskWorktree(this.root, done.worktreePath, done.branch);
+        await withRepoLock(
+          this.store,
+          this.root,
+          "fanout-reclaim",
+          () => removeTaskWorktree(this.root, done.worktreePath, done.branch),
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.reportAgent(done.subId, done.sub.title, "blocked", `${done.sub.title} - merge failed`);

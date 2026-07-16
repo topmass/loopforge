@@ -10,7 +10,7 @@ import {
 import { summarizeGoalProgress } from "./board/goal_progress.ts";
 import { normalizeRoot, runtimeDirName, workflowPath } from "./paths.ts";
 import { startServer } from "./web/server.ts";
-import { ensureGitRepository, gitMergeBranch } from "./workers/git_utils.ts";
+import { ensureGitRepository, gitMergeBranchLeased } from "./workers/git_utils.ts";
 import { GoalPlanner } from "./workers/goal_planner.ts";
 import { runScout } from "./workers/goal_scout.ts";
 import { GoalPursuer } from "./workers/goal_pursuer.ts";
@@ -986,7 +986,7 @@ async function mergeCommand(args: string[]): Promise<void> {
     if (task.status === "review") {
       store.requestTransition(task.id, "merging", "merger", "Manual merge started.");
     }
-    const output = await gitMergeBranch(root, task.branchName);
+    const output = await gitMergeBranchLeased(store, root, task.branchName);
     const event = store.appendEvent(
       task.id,
       null,
@@ -1066,7 +1066,7 @@ async function reviewCommand(args: string[]): Promise<void> {
       "merger",
       "Review approved. Merging branch.",
     );
-    const output = await gitMergeBranch(root, task.branchName);
+    const output = await gitMergeBranchLeased(store, root, task.branchName);
     store.appendEvent(
       task.id,
       null,

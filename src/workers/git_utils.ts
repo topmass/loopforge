@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Task } from "../board/types.ts";
 import { worktreesPath } from "../paths.ts";
+import { withRepoLock } from "./repo_coordinator.ts";
 
 export interface WorktreeAssignment {
   branchName: string;
@@ -500,35 +501,23 @@ export function parseDiff(numstat: string, patch: string): DiffResult {
 // dispatcher worker and the goal loop serialize merges into a shared root
 // across separate LoopForge processes without importing the whole store.
 export interface LeaseStore {
-  acquireLease(key: string, holder: string): boolean;
+  acquireLease(key: string, holder: string, staleMs?: number): boolean;
   releaseLease(key: string, holder: string): void;
 }
 
 // Serialize `git merge` into `root` across separate LoopForge processes that
-// share it, so two workers never merge into the same repo at once.
-// ponytail: 60s lease stale-ceiling, not heartbeated during the merge - a merge
-// that runs >60s could be stolen mid-flight. Heartbeat the lease during the hold
-// if merges ever get that slow.
+// share it. Delegates to the repository coordinator, so merges, worktree
+// metadata operations, and publishes all queue on the SAME heartbeated lock.
 export async function gitMergeBranchLeased(
   store: LeaseStore,
   root: string,
   branchName: string,
   opts: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<string> {
-  const key = `merge:${root}`;
-  const holder = `merge-${Deno.pid}-${crypto.randomUUID()}`;
-  const deadlineAt = Date.now() + (opts.timeoutMs ?? 60_000);
-  while (!store.acquireLease(key, holder)) {
-    if (Date.now() >= deadlineAt) {
-      throw new Error(`Timed out waiting for the ${key} lease.`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, opts.pollMs ?? 150));
-  }
-  try {
-    return await gitMergeBranch(root, branchName);
-  } finally {
-    store.releaseLease(key, holder);
-  }
+  return await withRepoLock(store, root, "merge", () => gitMergeBranch(root, branchName), {
+    timeoutMs: opts.timeoutMs ?? 60_000,
+    pollMs: opts.pollMs,
+  });
 }
 
 export async function ensureGitRepository(root: string): Promise<string[]> {

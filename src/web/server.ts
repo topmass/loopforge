@@ -20,7 +20,7 @@ import { CodexClient } from "../workers/codex_app_server.ts";
 import { piBinaryCommand } from "../workers/pi_rpc_client.ts";
 import {
   gitDiffRange,
-  gitMergeBranch,
+  gitMergeBranchLeased,
   gitMergeCommitFor,
   runCommand,
 } from "../workers/git_utils.ts";
@@ -1651,7 +1651,7 @@ export function startServer(
           if (task.status !== "review" && task.status !== "done") {
             return json({ error: `${task.id} must be in Review or Done before merge.` }, 400);
           }
-          const output = await gitMergeBranch(normalizedRoot, task.branchName);
+          const output = await gitMergeBranchLeased(store, normalizedRoot, task.branchName);
           const event = store.appendEvent(
             task.id,
             null,
@@ -1737,7 +1737,7 @@ export function startServer(
                   "Review approved. Merging branch.",
                 ).event,
               );
-              return gitMergeBranch(normalizedRoot, task.branchName).then((output) => {
+              return gitMergeBranchLeased(store, normalizedRoot, task.branchName).then((output) => {
                 broadcastActivity(
                   store.appendEvent(
                     task.id,

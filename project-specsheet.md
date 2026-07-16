@@ -420,10 +420,20 @@ Landed so far (steps 1-3, all additive):
   `GET /api/front/messages[?after=id]`, `POST /api/front/messages` (persists the user message;
   NO model turn - the conversational front runner is a later step).
 
-Not yet built (later steps, in order): repository coordinator with heartbeated leases for all
-root git mutations, per-goal loop runners behind it, goal-level "Approve merge" action mapped to
-the held-task path, the constrained front runner, Thread-as-default GUI, idle compaction, hub
-scheduling.
+- Step 4, the repository coordinator (`src/workers/repo_coordinator.ts`): `withRepoLock(store,
+  root, label, fn)` - ONE advisory lock key per project root (`repo:<root>`) guarding every
+  shared-git mutation, heartbeated every 5s while held (a live holder can never be stolen; a
+  crashed holder goes stale in 20s). Routed through it: `gitMergeBranchLeased` (now delegates to
+  the coordinator - goal loop + relay worker), both CLI manual-merge paths, both server
+  manual-merge routes, goal/task/fan-out worktree creation and reclamation, and root publish.
+  Fan-out's merge INTO its own loop worktree stays unleased (private to that loop). Rule: any
+  new code that merges to root, runs `git worktree add/prune/remove`, or publishes MUST go
+  through `withRepoLock` - never call those git operations bare.
+
+Not yet built (later steps, in order): per-goal loop runners behind the coordinator (retiring the
+global `goalLoopRunning` boolean), resource-keyed probe scheduling, goal-level "Approve merge"
+action mapped to the held-task path, the constrained front runner, Thread-as-default GUI, idle
+compaction, hub scheduling.
 
 ## Model Routing
 

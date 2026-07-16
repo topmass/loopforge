@@ -12,6 +12,7 @@ import { readGlobalConfig } from "../board/global_config.ts";
 import { consultRescue, RescueClientFactory } from "./rescue.ts";
 import { extractTurnId } from "./codex_event_normalizer.ts";
 import { shouldRecordActivity } from "./activity_filter.ts";
+import { withRepoLock } from "./repo_coordinator.ts";
 import {
   gitChangedFiles,
   gitCommitAll,
@@ -520,7 +521,12 @@ export class LoopForgeWorker {
         nextAction: "LoopForge is reading project instructions and preparing task context.",
         needsInputPrompt: null,
       });
-      const assignment = await prepareTaskWorktree(this.root, task, workflow.worktreesDir);
+      const assignment = await withRepoLock(
+        this.store,
+        this.root,
+        "task-worktree",
+        () => prepareTaskWorktree(this.root, task, workflow.worktreesDir),
+      );
       const projectInstructions = await collectAgentsInstructions(this.root);
       const projectMemory = buildProjectMemory(this.store);
       const queuedMessages = this.store.listPendingMessages(task.id);
@@ -1136,7 +1142,12 @@ export class LoopForgeWorker {
       risk: "none",
       interruptible: false,
     });
-    const result = await gitPublishRoot(this.root, publishCommitMessage(task));
+    const result = await withRepoLock(
+      this.store,
+      this.root,
+      "publish",
+      () => gitPublishRoot(this.root, publishCommitMessage(task)),
+    );
     this.emit(
       this.store.appendEvent(
         task.id,
@@ -1828,7 +1839,12 @@ ${result.notes}`,
     // The branch is merged into root now; reclaim its worktree and branch so a
     // long unattended run doesn't leak them. PR-path branches are left for the PR.
     if (!pullRequest && task.worktreePath && task.branchName) {
-      await removeTaskWorktree(this.root, task.worktreePath, task.branchName);
+      await withRepoLock(
+        this.store,
+        this.root,
+        "task-reclaim",
+        () => removeTaskWorktree(this.root, task.worktreePath!, task.branchName!),
+      );
     }
     let doneTask = this.store.getTask(task.id);
     doneTask = this.store.updateTaskLoop(doneTask.id, {
