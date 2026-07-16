@@ -172,12 +172,20 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
-  deleteProbe: (id: number) => jsonFetch<{ ok: boolean }>(`/api/probes/${id}`, { method: "DELETE" }),
+  deleteProbe: (id: number) =>
+    jsonFetch<{ ok: boolean }>(`/api/probes/${id}`, { method: "DELETE" }),
   addProbe: (goalId: string, label: string, command: string) =>
     jsonFetch<{ probes: Probe[] }>(`/api/goals/${goalId}/probes`, {
       method: "POST",
       body: JSON.stringify({ label, command }),
     }),
+  // Explicit merge approval for an attended hold - maps to the held task's
+  // restart-to-merge path server-side. Never inferred from chat.
+  approveMerge: (goalId: string) =>
+    jsonFetch<{ ok: boolean; goalId: string; taskId: string }>(
+      `/api/goals/${goalId}/approve-merge`,
+      { method: "POST" },
+    ),
   checkGoal: (goalId: string) =>
     jsonFetch<{ goalId: string; total: number; passed: number; probes: Probe[] }>(
       `/api/goals/${goalId}/check`,
@@ -230,7 +238,9 @@ export const api = {
 // Reconstruct a typed LifecycleEvent from a stored ActivityEvent (role=lifecycle,
 // canonical kind, payload {goalId, data} in rawJson). The board snapshot strips
 // rawJson, so the SSE "activity" events (which keep it) are the source.
-export function parseLifecycle(event: ActivityEvent & { rawJson?: string | null }): LifecycleEvent | null {
+export function parseLifecycle(
+  event: ActivityEvent & { rawJson?: string | null },
+): LifecycleEvent | null {
   if (event.role !== LIFECYCLE_ROLE) {
     return null;
   }
@@ -239,7 +249,11 @@ export function parseLifecycle(event: ActivityEvent & { rawJson?: string | null 
   const raw = (event as { rawJson?: string | null }).rawJson;
   if (raw) {
     try {
-      const parsed = JSON.parse(raw) as { goalId?: string; taskRef?: string; data?: Record<string, unknown> };
+      const parsed = JSON.parse(raw) as {
+        goalId?: string;
+        taskRef?: string;
+        data?: Record<string, unknown>;
+      };
       goalId = typeof parsed.goalId === "string" ? parsed.goalId : null;
       if (typeof parsed.taskRef === "string") {
         event = { ...event, taskId: parsed.taskRef };

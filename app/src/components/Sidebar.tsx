@@ -202,16 +202,22 @@ export function Sidebar() {
                   🛠
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={`block truncate text-sm font-semibold ${active ? "text-ink" : "text-ink"}`}>
+                  <span
+                    className={`block truncate text-sm font-semibold ${
+                      active ? "text-ink" : "text-ink"
+                    }`}
+                  >
                     {p.name}
                   </span>
                   <span className="block truncate text-[11px] text-ink-muted" title={p.root}>
                     {p.root}
                   </span>
                 </span>
-                {/* Every project row is closable (registry-only removal; serve
+                {
+                  /* Every project row is closable (registry-only removal; serve
                     re-registers its own root next boot). x arms; a second click
-                    within 4s removes it. */}
+                    within 4s removes it. */
+                }
                 <span
                   role="button"
                   tabIndex={-1}
@@ -241,8 +247,10 @@ export function Sidebar() {
               No loops yet.
             </div>
           )}
-          {/* "All" scopes the board to every loop (unified view). Lighter than a
-              loop row; selected whenever no single loop is focused. */}
+          {
+            /* "All" scopes the board to every loop (unified view). Lighter than a
+              loop row; selected whenever no single loop is focused. */
+          }
           {goals.length > 0 && (
             <button
               type="button"
@@ -267,7 +275,9 @@ export function Sidebar() {
                 <span>{historyOpen ? "▾" : "▸"}</span>
                 history <span className="text-ink-faint">{closedGoals.length}</span>
               </button>
-              {historyOpen && <div className="mt-1 space-y-1">{closedGoals.map(renderLoopRow)}</div>}
+              {historyOpen && (
+                <div className="mt-1 space-y-1">{closedGoals.map(renderLoopRow)}</div>
+              )}
             </div>
           )}
         </div>

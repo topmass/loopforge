@@ -65,7 +65,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         onChange={(e) => onChange(e.target.value)}
         className="rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
       >
-        {["off", ...BACKENDS].map((b) => <option key={b} value={b} className="bg-surface-overlay">{b}</option>)}
+        {["off", ...BACKENDS].map((b) => (
+          <option key={b} value={b} className="bg-surface-overlay">{b}</option>
+        ))}
       </select>
     </div>
   );
@@ -88,7 +90,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       >
         <div className="mb-3 flex items-center justify-between">
           <span className="text-base font-semibold">Model settings</span>
-          <button type="button" onClick={onClose} className="text-ink-muted transition-colors hover:text-ink">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-ink-muted transition-colors hover:text-ink"
+          >
+            ✕
+          </button>
         </div>
         {saving && <div className="mb-2 text-xs text-accent">Saving {saving}...</div>}
 
@@ -104,7 +112,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => void wrap("main backend", () => api.setBackend(e.target.value))}
             className="rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
           >
-            {BACKENDS.map((b) => <option key={b} value={b} className="bg-surface-overlay">{b}</option>)}
+            {BACKENDS.map((b) => (
+              <option key={b} value={b} className="bg-surface-overlay">{b}</option>
+            ))}
           </select>
         </div>
 
@@ -113,24 +123,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           help="Senior model consulted when a task keeps failing. 'savior'."
           value={roleValue(runtime?.rescue)}
           onChange={(v) =>
-            void wrap("rescue", () =>
-              api.setRescue(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
+            void wrap(
+              "rescue",
+              () => api.setRescue(v === "off" ? { enabled: false } : { enabled: true, backend: v }),
+            )}
         />
         <RoleRow
           label="Planner model"
           help="Compiles goals into tasks + win conditions. Off = follow main."
           value={roleValue(runtime?.planner)}
           onChange={(v) =>
-            void wrap("planner", () =>
-              api.setPlanner(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
+            void wrap(
+              "planner",
+              () =>
+                api.setPlanner(v === "off" ? { enabled: false } : { enabled: true, backend: v }),
+            )}
         />
         <RoleRow
           label="Scout model"
           help="Proposes next-build ideas for your review. Off = no scouting."
           value={roleValue(runtime?.scout)}
           onChange={(v) =>
-            void wrap("scout", () =>
-              api.setScout(v === "off" ? { enabled: false } : { enabled: true, backend: v }))}
+            void wrap(
+              "scout",
+              () => api.setScout(v === "off" ? { enabled: false } : { enabled: true, backend: v }),
+            )}
         />
 
         {/* Model power: codex knobs (per-project) + the Claude model (machine-wide). */}
@@ -169,7 +186,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onClick={() =>
                         void wrap("reasoning", () => api.setConfig({ reasoningEffort: r }))}
                       className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                        on ? "bg-accent-strong text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
+                        on
+                          ? "bg-accent-strong text-on-accent shadow-sm"
+                          : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {r}
@@ -187,10 +206,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     <button
                       key={label}
                       type="button"
-                      onClick={() =>
-                        void wrap("speed", () => api.setConfig({ fastMode: fast }))}
+                      onClick={() => void wrap("speed", () => api.setConfig({ fastMode: fast }))}
                       className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition ${
-                        on ? "bg-accent-strong text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
+                        on
+                          ? "bg-accent-strong text-on-accent shadow-sm"
+                          : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {label}
@@ -214,7 +234,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <span className="w-16 shrink-0 text-xs text-ink-muted">model</span>
               <select
                 value={claudeOther ||
-                    !CLAUDE_MODELS.includes((runtime?.claudeModel ?? "") as typeof CLAUDE_MODELS[number])
+                    !CLAUDE_MODELS.includes(
+                      (runtime?.claudeModel ?? "") as typeof CLAUDE_MODELS[number],
+                    )
                   ? "other"
                   : runtime?.claudeModel}
                 onChange={(e) => {
@@ -227,7 +249,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 }}
                 className="flex-1 rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
               >
-                {CLAUDE_MODELS.map((m) => <option key={m} value={m} className="bg-surface-overlay">{m}</option>)}
+                {CLAUDE_MODELS.map((m) => (
+                  <option key={m} value={m} className="bg-surface-overlay">{m}</option>
+                ))}
                 <option value="other" className="bg-surface-overlay">other...</option>
               </select>
             </div>
@@ -258,10 +282,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     <button
                       key={t}
                       type="button"
-                      onClick={() =>
-                        void wrap("claude effort", () => api.setClaudeEffort(t))}
+                      onClick={() => void wrap("claude effort", () => api.setClaudeEffort(t))}
                       className={`flex-1 rounded-lg px-1.5 py-1 text-[11px] font-medium transition ${
-                        on ? "bg-accent-strong text-on-accent shadow-sm" : "text-ink-muted hover:bg-surface-sunken"
+                        on
+                          ? "bg-accent-strong text-on-accent shadow-sm"
+                          : "text-ink-muted hover:bg-surface-sunken"
                       }`}
                     >
                       {t}
@@ -275,8 +300,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* local: the pi coding agent. A doctor line for the binary, plus an
-              advanced override to route through pi's own providers. */}
+          {
+            /* local: the pi coding agent. A doctor line for the binary, plus an
+              advanced override to route through pi's own providers. */
+          }
           <div className="mt-3 space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
               local
@@ -314,8 +341,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   defaultValue={runtime?.localPiProvider ?? ""}
                   placeholder="pi provider (blank = local endpoint)"
                   onBlur={(e) =>
-                    void wrap("pi provider", () =>
-                      api.setLocalPi({ provider: e.target.value.trim() }))}
+                    void wrap(
+                      "pi provider",
+                      () => api.setLocalPi({ provider: e.target.value.trim() }),
+                    )}
                   className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
                 />
                 <input
@@ -338,15 +367,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <div>
             <div className="text-sm font-medium text-ink">Parallel sub-agents</div>
             <div className="text-xs text-ink-muted">
-              Max sub-agents the main agent runs at once. It is told to fan out work up to this many.
+              Max sub-agents the main agent runs at once. It is told to fan out work up to this
+              many.
             </div>
           </div>
           <div className="flex items-center gap-1 rounded-xl border border-line bg-surface-sunken p-1">
             <button
               type="button"
-              onClick={() =>
-                void wrap("parallel agents", () =>
-                  api.setMaxAgents(Math.max(1, (runtime?.maxParallelAgents ?? 5) - 1)))}
+              onClick={() => void wrap(
+                "parallel agents",
+                () => api.setMaxAgents(Math.max(1, (runtime?.maxParallelAgents ?? 5) - 1)),
+              )}
               className="h-7 w-7 rounded-lg text-ink transition hover:bg-surface-sunken"
             >
               −
@@ -357,8 +388,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               onClick={() =>
-                void wrap("parallel agents", () =>
-                  api.setMaxAgents(Math.min(12, (runtime?.maxParallelAgents ?? 5) + 1)))}
+                void wrap(
+                  "parallel agents",
+                  () => api.setMaxAgents(Math.min(12, (runtime?.maxParallelAgents ?? 5) + 1)),
+                )}
               className="h-7 w-7 rounded-lg text-ink transition hover:bg-surface-sunken"
             >
               +
@@ -377,8 +410,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <input
             type="checkbox"
             checked={runtime?.workflow?.useWorktrees !== false}
-            onChange={(e) =>
-              void wrap("worktrees", () => api.setUseWorktrees(e.target.checked))}
+            onChange={(e) => void wrap("worktrees", () => api.setUseWorktrees(e.target.checked))}
             className="h-4 w-4 accent-accent"
           />
         </label>

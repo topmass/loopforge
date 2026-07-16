@@ -46,8 +46,10 @@ export function GoalStrip() {
             />
             <span className="font-medium text-ink">{g.id}</span>
             <span className="max-w-[22ch] truncate text-ink-muted">{words}</span>
-            {/* x arms; a second click within 4s removes. stopPropagation so the
-                chip's select-on-click never fires from the x. */}
+            {
+              /* x arms; a second click within 4s removes. stopPropagation so the
+                chip's select-on-click never fires from the x. */
+            }
             <span
               role="button"
               tabIndex={-1}

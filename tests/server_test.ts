@@ -1864,3 +1864,68 @@ Deno.test("two goal loops on different goals run concurrently under per-goal adm
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+Deno.test("approve-merge maps to the held task's restart-to-merge path", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  // Loop work waiting on a manual hold: a real branch with a real change.
+  await git(root, ["checkout", "-b", "loopforge/goal-hold"]);
+  await Deno.writeTextFile(`${root}/held.txt`, "held work\n");
+  await git(root, ["add", "held.txt"]);
+  await git(root, ["commit", "-m", "held work"]);
+  await git(root, ["checkout", "main"]);
+  const boot = new BoardStore(root);
+  let goalId = "";
+  try {
+    boot.initProject();
+    const { goal } = boot.createGoal("Approve merge flow");
+    goalId = goal.id;
+    boot.createLoopMergeHoldTask(
+      goal.id,
+      "loopforge/goal-hold",
+      "Check held.txt by hand, then restart this task to merge.",
+      "evidence recorded",
+    );
+  } finally {
+    boot.close();
+  }
+
+  const port = 53833 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new TestCodexClient(onEvent),
+  });
+  try {
+    // The hold is visible to ledger reads before approval.
+    const status = await fetch(`${server.url}/api/front/status`).then((r) => r.json());
+    assertEquals(status.holds.length, 1);
+    assertEquals(status.holds[0].goalId, goalId);
+    assertEquals(status.holds[0].branch, "loopforge/goal-hold");
+
+    // A goal without a hold 404s instead of merging anything.
+    const missing = await fetch(`${server.url}/api/goals/GOAL-999/approve-merge`, {
+      method: "POST",
+    });
+    assertEquals(missing.status, 404);
+    await missing.json();
+
+    const approved = await fetch(`${server.url}/api/goals/${goalId}/approve-merge`, {
+      method: "POST",
+    }).then((r) => r.json());
+    assertEquals(approved.ok, true);
+
+    // The same held-task path merges: the branch's work lands in root.
+    for (let index = 0; index < 100; index++) {
+      const merged = await Deno.stat(`${root}/held.txt`).then(() => true).catch(() => false);
+      if (merged) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Approved merge never landed in the root working tree.");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});

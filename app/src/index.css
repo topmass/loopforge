@@ -56,8 +56,14 @@
    emitted to :root and `var(--font-sans)` resolves. Space Grotesk (variable) for
    UI, JetBrains Mono for machine-flavored text (ids, probes, tools, diffs). */
 @theme {
-  --font-sans: "Space Grotesk Variable", ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", Roboto, sans-serif;
+  --font-sans:
+    "Space Grotesk Variable",
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -150,7 +156,10 @@
   --t-scrim: rgba(0, 0, 0, 0.60);
 }
 
-html, body, #root { height: 100%; margin: 0; }
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
 
 body {
   background: var(--t-surface);
@@ -172,10 +181,21 @@ body {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(55% 45% at 8% 0%, color-mix(in srgb, var(--t-accent) 7%, transparent), transparent 60%),
-    radial-gradient(50% 50% at 100% 100%, color-mix(in srgb, var(--t-ok) 6%, transparent), transparent 60%);
+    radial-gradient(
+      55% 45% at 8% 0%,
+      color-mix(in srgb, var(--t-accent) 7%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+    50% 50% at 100% 100%,
+    color-mix(in srgb, var(--t-ok) 6%, transparent),
+    transparent 60%
+  );
 }
-#root > * { position: relative; z-index: 1; }
+#root > * {
+  position: relative;
+  z-index: 1;
+}
 
 /* Raised card with a soft editorial shadow. */
 .card {
@@ -224,7 +244,9 @@ body {
 /* Live status dot: the base dot is drawn by the caller's bg color; this adds a
    radar ping - a token-colored ring (currentColor, so callers set text-*) that
    scales out and fades. Applied via STATUS.live.dot (components/ui.ts). */
-.radar-dot { position: relative; }
+.radar-dot {
+  position: relative;
+}
 .radar-dot::after {
   content: "";
   position: absolute;
@@ -234,11 +256,20 @@ body {
   animation: radar 1.8s ease-out infinite;
 }
 @keyframes radar {
-  0%   { transform: scale(1);   opacity: 0.5; }
-  100% { transform: scale(2.6); opacity: 0; }
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
 }
 
-*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
 *::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--t-ink) 16%, transparent);
   border-radius: 8px;
@@ -246,4 +277,6 @@ body {
 *::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--t-ink) 26%, transparent);
 }
-*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

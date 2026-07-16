@@ -16,10 +16,18 @@ export function RightPanel({ tab, onTab }: { tab: RightTab; onTab: (t: RightTab)
   return (
     <aside className="glass flex w-96 shrink-0 flex-col border-y-0 border-r-0 border-l border-line">
       <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
-        <button type="button" onClick={() => onTab("detail")} className={tabClass(tab === "detail")}>
+        <button
+          type="button"
+          onClick={() => onTab("detail")}
+          className={tabClass(tab === "detail")}
+        >
           Detail
         </button>
-        <button type="button" onClick={() => onTab("activity")} className={tabClass(tab === "activity")}>
+        <button
+          type="button"
+          onClick={() => onTab("activity")}
+          className={tabClass(tab === "activity")}
+        >
           Activity
         </button>
         <button type="button" onClick={() => onTab("diff")} className={tabClass(tab === "diff")}>

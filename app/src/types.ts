@@ -76,6 +76,7 @@ export interface Task {
   description?: string;
   needsInputPrompt?: string | null;
   currentGate?: string;
+  branchName?: string | null;
 }
 
 export interface Probe {

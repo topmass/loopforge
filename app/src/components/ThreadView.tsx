@@ -347,7 +347,9 @@ function EntryRow(
               {title}
             </span>
             <span
-              className={`w-full text-xs text-ink-muted ${open ? "whitespace-pre-wrap" : "truncate"}`}
+              className={`w-full text-xs text-ink-muted ${
+                open ? "whitespace-pre-wrap" : "truncate"
+              }`}
             >
               {entry.text}
             </span>

@@ -54,13 +54,19 @@ export function DetailPanel() {
           </div>
           <div className="truncate text-sm font-semibold text-ink">{selectedTaskId}</div>
         </div>
-        <button type="button" onClick={() => selectTask(null)} className="text-ink-muted hover:text-ink">
+        <button
+          type="button"
+          onClick={() => selectTask(null)}
+          className="text-ink-muted hover:text-ink"
+        >
           ✕
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor}`}>
+        <span
+          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColor}`}
+        >
           {statusLabel}
         </span>
 

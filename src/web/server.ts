@@ -518,12 +518,25 @@ export function startServer(
             .filter((goal) => goal.status === "closed")
             .slice(-5)
             .map((goal) => ({ id: goal.id, closure: goal.closureSummary ?? "" }));
+          // Merges waiting on explicit human approval (see /approve-merge).
+          const holds = board.tasks
+            .filter((task) =>
+              task.status === "review" && task.currentGate === "manual-verification" &&
+              task.branchName
+            )
+            .map((task) => ({
+              goalId: task.goalId ?? null,
+              taskId: task.id,
+              branch: task.branchName,
+              prompt: task.needsInputPrompt ?? "",
+            }));
           return json({
             revision: store.eventRevision(),
             project: { name: path.basename(normalizedRoot) || "project", path: normalizedRoot },
             frontThreadId: store.getFrontThreadId(),
             goals,
             blockers,
+            holds,
             receipts,
             activeWorkers: board.agentStatuses.filter((status) =>
               board.runs.some((run) =>
@@ -1548,6 +1561,48 @@ export function startServer(
           const result = store.clearDoneTasks();
           broadcastActivity(result.event);
           return json({ ok: true, count: result.count, board: store.getBoard() });
+        }
+
+        // Goal-level merge approval (thread-first step 6): the audited signal
+        // stays the held task's restart - this route just finds the goal's
+        // hold and dispatches it, so the GUI can offer "Approve merge" without
+        // the user knowing about synthetic Review cards. Approval is always
+        // this explicit action, never inferred from chat.
+        const approveMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/approve-merge$/);
+        if (approveMatch && request.method === "POST") {
+          const goalId = decodeURIComponent(approveMatch[1]).toUpperCase();
+          try {
+            store.getGoal(goalId);
+          } catch {
+            return json({ error: `${goalId} not found.` }, 404);
+          }
+          const hold = store.getBoard().tasks.find((task) =>
+            task.goalId === goalId && task.status === "review" &&
+            task.currentGate === "manual-verification" && task.branchName
+          );
+          if (!hold) {
+            return json({ error: `${goalId} has no merge waiting for approval.` }, 404);
+          }
+          broadcastActivity(
+            store.appendEvent(
+              hold.id,
+              null,
+              "merger",
+              "approve",
+              `${goalId}: merge approved; merging ${hold.branchName}.`,
+            ),
+          );
+          queueMicrotask(() => {
+            const worker = new LoopForgeWorker(normalizedRoot, store, {
+              onEvent: broadcastActivity,
+              createCodexClient: options.createCodexClient,
+            });
+            worker.runTask(hold.id).then(broadcastBoard).catch((error) => {
+              const message = error instanceof Error ? error.message : String(error);
+              broadcast("error", { message });
+            });
+          });
+          return json({ ok: true, goalId, taskId: hold.id });
         }
 
         const runMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/run$/);

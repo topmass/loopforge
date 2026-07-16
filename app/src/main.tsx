@@ -25,15 +25,21 @@ async function bootstrap() {
   try {
     const seed = await api.lifecycle();
     for (const event of seed.events) {
-      store.applyActivity({
-        id: 0,
-        taskId: event.taskId,
-        role: "lifecycle",
-        kind: event.kind,
-        message: event.summary,
-        createdAt: "",
-        rawJson: JSON.stringify({ goalId: event.goalId, taskRef: event.taskId, data: event.data }),
-      } as Parameters<typeof store.applyActivity>[0]);
+      store.applyActivity(
+        {
+          id: 0,
+          taskId: event.taskId,
+          role: "lifecycle",
+          kind: event.kind,
+          message: event.summary,
+          createdAt: "",
+          rawJson: JSON.stringify({
+            goalId: event.goalId,
+            taskRef: event.taskId,
+            data: event.data,
+          }),
+        } as Parameters<typeof store.applyActivity>[0],
+      );
     }
   } catch {
     // no backlog yet

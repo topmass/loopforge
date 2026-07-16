@@ -6,7 +6,7 @@ import { TopBar } from "./components/TopBar";
 import { AlertsBar } from "./components/AlertsBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar } from "./components/Sidebar";
-import { CenterTabs, type CenterTab } from "./components/CenterTabs";
+import { type CenterTab, CenterTabs } from "./components/CenterTabs";
 import { BoardView } from "./components/BoardView";
 import { ThreadView } from "./components/ThreadView";
 import { RightPanel, type RightTab } from "./components/RightPanel";
@@ -62,19 +62,21 @@ export function App() {
       try {
         const seed = await api.lifecycle();
         for (const event of seed.events) {
-          store.applyActivity({
-            id: 0,
-            taskId: event.taskId,
-            role: "lifecycle",
-            kind: event.kind,
-            message: event.summary,
-            createdAt: "",
-            rawJson: JSON.stringify({
-              goalId: event.goalId,
-              taskRef: event.taskId,
-              data: event.data,
-            }),
-          } as Parameters<typeof store.applyActivity>[0]);
+          store.applyActivity(
+            {
+              id: 0,
+              taskId: event.taskId,
+              role: "lifecycle",
+              kind: event.kind,
+              message: event.summary,
+              createdAt: "",
+              rawJson: JSON.stringify({
+                goalId: event.goalId,
+                taskRef: event.taskId,
+                data: event.data,
+              }),
+            } as Parameters<typeof store.applyActivity>[0],
+          );
         }
       } catch {
         // no backlog on the new project yet

@@ -68,9 +68,7 @@ export function DiffPanel() {
       if (seeded.current !== id) {
         seeded.current = id;
         setExpanded(
-          next.files.length <= AUTO_EXPAND_MAX
-            ? new Set(next.files.map((f) => f.path))
-            : new Set(),
+          next.files.length <= AUTO_EXPAND_MAX ? new Set(next.files.map((f) => f.path)) : new Set(),
         );
       }
     } catch (e) {

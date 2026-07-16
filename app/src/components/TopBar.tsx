@@ -53,7 +53,9 @@ export function TopBar(
           <path d="M20 12a8 8 0 1 1-2.34-5.66" />
           <path d="M20 4v4h-4" />
         </svg>
-        <span>Loop<span className="text-accent">Forge</span></span>
+        <span>
+          Loop<span className="text-accent">Forge</span>
+        </span>
       </span>
       <button
         type="button"
@@ -66,9 +68,21 @@ export function TopBar(
       {runtime && (
         <>
           {role("main", runtime.backendRaw ?? "?")}
-          {role("rescue", runtime.rescue?.enabled ? runtime.rescue.backend : "off", !!runtime.rescue?.enabled)}
-          {role("planner", runtime.planner?.enabled ? runtime.planner.backend : "off", !!runtime.planner?.enabled)}
-          {role("scout", runtime.scout?.enabled ? runtime.scout.backend : "off", !!runtime.scout?.enabled)}
+          {role(
+            "rescue",
+            runtime.rescue?.enabled ? runtime.rescue.backend : "off",
+            !!runtime.rescue?.enabled,
+          )}
+          {role(
+            "planner",
+            runtime.planner?.enabled ? runtime.planner.backend : "off",
+            !!runtime.planner?.enabled,
+          )}
+          {role(
+            "scout",
+            runtime.scout?.enabled ? runtime.scout.backend : "off",
+            !!runtime.scout?.enabled,
+          )}
         </>
       )}
       {now && (

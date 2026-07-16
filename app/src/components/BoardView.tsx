@@ -2,9 +2,9 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "../store";
 import { api } from "../api";
-import { workerChips, type WorkerChip } from "../agent_status";
+import { type WorkerChip, workerChips } from "../agent_status";
 import type { PlanStep } from "../types";
-import { STATUS, spring } from "./ui";
+import { spring, STATUS } from "./ui";
 import { LineMark } from "./marks";
 import { GoalStrip } from "./GoalStrip";
 import { ProbePanel } from "./ProbePanel";
@@ -133,6 +133,14 @@ export function BoardView() {
     loopStatus && scopedGoal?.status === "open" &&
       statusActiveAt !== undefined && Date.now() - statusActiveAt < 120_000,
   );
+  // A merge held for the user's manual verification: surface the explicit
+  // Approve action instead of asking them to find and restart a Review card.
+  const mergeHold = activeGoalId
+    ? (board?.tasks ?? []).find((t) =>
+      t.goalId === activeGoalId && t.status === "review" &&
+      t.currentGate === "manual-verification" && t.branchName
+    )
+    : undefined;
 
   if (goals.length === 0) {
     return <EmptyState />;
@@ -179,6 +187,29 @@ export function BoardView() {
           probes={goalProbes}
           loopLive={statusActiveAt !== undefined && Date.now() - statusActiveAt < 120_000}
         />
+      )}
+      {mergeHold && activeGoalId && (
+        <div className="flex items-center gap-3 border-b border-warn bg-warn-soft px-4 py-2.5">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS.held.dot}`} />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-warn-ink">
+              Merge held for your verification
+            </div>
+            <div
+              className="truncate text-[11px] text-ink-muted"
+              title={mergeHold.needsInputPrompt ?? ""}
+            >
+              {mergeHold.needsInputPrompt}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void api.approveMerge(activeGoalId)}
+            className="shrink-0 rounded-xl bg-accent-strong px-3 py-1.5 text-xs font-semibold text-on-accent transition hover:opacity-90"
+          >
+            Approve merge
+          </button>
+        </div>
       )}
       <ActiveWorkersStrip chips={workers} onSelect={selectTask} />
       {/* Parallel sub-agents as a live strip - lit while coding, calm when merged. */}
