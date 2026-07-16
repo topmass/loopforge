@@ -173,6 +173,17 @@ export interface GoalProbeDraft {
   timeoutMs?: number;
 }
 
+// One message in the user-facing front thread (thread-first migration).
+// Distinct from `messages` (task steers) and `goal_messages` (loop steers):
+// this is the chief-of-staff conversation itself.
+export interface FrontMessage {
+  id: number;
+  role: "user" | "front";
+  message: string;
+  turnRef: string | null;
+  createdAt: string;
+}
+
 export interface Lesson {
   id: number;
   text: string;

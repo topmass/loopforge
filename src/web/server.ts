@@ -29,7 +29,7 @@ import { GoalPursuer } from "../workers/goal_pursuer.ts";
 import { runScout } from "../workers/goal_scout.ts";
 import { GoalLoopRunner } from "../workers/goal_loop.ts";
 import { codexEventToLifecycle } from "../workers/codex_lifecycle_adapter.ts";
-import { runGoalProbes } from "../workers/goal_probes.ts";
+import { probeLights, runGoalProbes } from "../workers/goal_probes.ts";
 import { GoalReviewer } from "../workers/goal_reviewer.ts";
 import { LoopForgeWorker } from "../workers/loopforge_worker.ts";
 import { buildProjectMemory } from "../workers/project_memory.ts";
@@ -460,6 +460,90 @@ export function startServer(
 
         if (url.pathname === "/api/board" && request.method === "GET") {
           return json(store.getBoard());
+        }
+
+        // ---- Front thread (thread-first migration, step 3) ----
+        // Ledger-backed reads: deterministic project answers generated fresh
+        // from the database and stamped with an event revision, so the future
+        // front agent narrates current truth instead of recalling stale state.
+        if (url.pathname === "/api/front/status" && request.method === "GET") {
+          const board = store.getBoard();
+          const probesByGoal = new Map<string, typeof board.probes>();
+          for (const probe of board.probes) {
+            probesByGoal.set(probe.goalId, [
+              ...(probesByGoal.get(probe.goalId) ?? []),
+              probe,
+            ]);
+          }
+          const goals = board.goals.map((goal) => {
+            const probes = probesByGoal.get(goal.id) ?? [];
+            return {
+              id: goal.id,
+              text: goal.text,
+              status: goal.status,
+              closureSummary: goal.closureSummary ?? "",
+              probes: {
+                total: probes.length,
+                passed: probes.filter((probe) => probe.lastStatus === "passed").length,
+                lights: probeLights(probes),
+              },
+              loop: {
+                running: goalLoopRunning && goal.status === "open",
+                worktree: goal.loopWorktree ?? null,
+                branch: goal.loopBranch ?? null,
+              },
+            };
+          });
+          const blockers = board.tasks
+            .filter((task) => task.status === "blocked")
+            .map((task) => ({
+              id: task.id,
+              goalId: task.goalId ?? null,
+              title: task.title,
+              prompt: task.needsInputPrompt ?? "",
+            }));
+          const receipts = board.goals
+            .filter((goal) => goal.status === "closed")
+            .slice(-5)
+            .map((goal) => ({ id: goal.id, closure: goal.closureSummary ?? "" }));
+          return json({
+            revision: store.eventRevision(),
+            project: { name: path.basename(normalizedRoot) || "project", path: normalizedRoot },
+            frontThreadId: store.getFrontThreadId(),
+            goals,
+            blockers,
+            receipts,
+            activeWorkers: board.agentStatuses.filter((status) =>
+              board.runs.some((run) =>
+                run.id === status.runId && run.status === "running"
+              )
+            ).length,
+          });
+        }
+
+        if (url.pathname === "/api/front/messages" && request.method === "GET") {
+          const after = url.searchParams.get("after");
+          const messages = store.listFrontMessages(
+            after !== null ? { afterId: Number(after) } : {},
+          );
+          return json({
+            messages,
+            frontThreadId: store.getFrontThreadId(),
+            revision: store.eventRevision(),
+          });
+        }
+
+        // Storage only for now: the conversational front runner is a later
+        // migration step; persisting the transcript first makes it durable
+        // and replayable before any model is wired up.
+        if (url.pathname === "/api/front/messages" && request.method === "POST") {
+          const body = await readJson<{ text?: string }>(request);
+          const text = body.text?.trim() ?? "";
+          if (!text) {
+            return json({ error: "text is required." }, 400);
+          }
+          const message = store.appendFrontMessage("user", text);
+          return json({ message, revision: store.eventRevision() }, 201);
         }
 
         // The canonical typed lifecycle feed - the dashboard/Kanban subscribes

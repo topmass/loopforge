@@ -397,6 +397,34 @@ Blockers go through main-agent triage before reaching the user. Triage can:
 
 Repeated blocker fingerprints and `authority.max_triage_retries` prevent loops.
 
+## Thread-First Migration (in progress)
+
+Direction: one main chat thread per project (chief-of-staff agent, short control-plane turns,
+never blocked) becomes the default surface; Kanban demotes to an optional Operations/Evidence
+view. The SQLite board model and every existing API stay as the execution substrate. The full
+hardened plan (10 steps) came from the 2026-07-06 codex ideation loop; the durable capsule lives
+in agent memory (`thread-first-blueprint`).
+
+Landed so far (steps 1-3, all additive):
+
+- `tests/contract_test.ts` freezes today's wire contracts: board snapshot keys, goal/task/probe
+  field names, runtime keys, the lifecycle event shape (`role: "lifecycle"` + rawJson
+  goalId/data), and the merge-hold task's restart-to-merge semantics. Breaking any of these in a
+  later step fails the suite.
+- Front thread identity is SEPARATE from `main_thread_id` (task workers fork from the main
+  thread; user chat must not contaminate that lineage): `front_thread_id` project-state key +
+  `front_messages` table (`store.getFrontThreadId/setFrontThreadId/appendFrontMessage/
+  listFrontMessages`), and `store.eventRevision()` (max event id) as the ledger revision stamp.
+- Ledger-backed front reads: `GET /api/front/status` (deterministic digest: goals with probe
+  counts/lights, loop state, blockers, receipts, activeWorkers, revision),
+  `GET /api/front/messages[?after=id]`, `POST /api/front/messages` (persists the user message;
+  NO model turn - the conversational front runner is a later step).
+
+Not yet built (later steps, in order): repository coordinator with heartbeated leases for all
+root git mutations, per-goal loop runners behind it, goal-level "Approve merge" action mapped to
+the held-task path, the constrained front runner, Thread-as-default GUI, idle compaction, hub
+scheduling.
+
 ## Model Routing
 
 Default worker backend is Codex through the Python SDK bridge over local Codex app-server.

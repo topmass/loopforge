@@ -33,6 +33,7 @@ import {
   EXTERNAL_AGENT_STATES,
   ExternalAgentState,
   ExternalAgentStatus,
+  FrontMessage,
   Goal,
   GoalProbe,
   GoalProbeDraft,
@@ -370,6 +371,51 @@ export class BoardStore {
       mainThreadResetAt: this.getProjectValue("main_thread_reset_at"),
       mainThreadSummary: this.getProjectValue("main_thread_summary") ?? "",
     };
+  }
+
+  // ---- Front thread (thread-first migration, step 2) ----
+  // The user-facing chief-of-staff thread is a SEPARATE identity from
+  // main_thread_id: task workers fork from the main thread and triage resumes
+  // it, so user conversation must never contaminate that lineage.
+
+  getFrontThreadId(): string | null {
+    return this.getProjectValue("front_thread_id");
+  }
+
+  setFrontThreadId(threadId: string | null): void {
+    if (threadId === null) {
+      this.db.prepare("DELETE FROM project_state WHERE key = 'front_thread_id'").run();
+      return;
+    }
+    this.setProjectValue("front_thread_id", threadId);
+  }
+
+  appendFrontMessage(role: "user" | "front", message: string, turnRef?: string): FrontMessage {
+    const row = this.db.prepare(
+      "INSERT INTO front_messages (role, message, turn_ref, created_at) VALUES (?, ?, ?, ?) RETURNING *",
+    ).get(role, message, turnRef ?? null, timestamp()) as SqlRow;
+    return frontMessageFromRow(row);
+  }
+
+  listFrontMessages(opts: { afterId?: number; limit?: number } = {}): FrontMessage[] {
+    const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+    const rows = opts.afterId !== undefined
+      ? this.db.prepare(
+        "SELECT * FROM front_messages WHERE id > ? ORDER BY id ASC LIMIT ?",
+      ).all(opts.afterId, limit)
+      : this.db.prepare(
+        "SELECT * FROM (SELECT * FROM front_messages ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
+      ).all(limit);
+    return (rows as SqlRow[]).map(frontMessageFromRow);
+  }
+
+  // Monotonic ledger revision: the max event id. Front reads stamp answers
+  // with this so "as of when?" is always answerable.
+  eventRevision(): number {
+    const row = this.db.prepare("SELECT COALESCE(MAX(id), 0) AS rev FROM events").get() as {
+      rev: number;
+    };
+    return row.rev;
   }
 
   setMainThread(threadId: string, summary = ""): ProjectState {
@@ -2085,6 +2131,14 @@ export class BoardStore {
         acquired_at INTEGER NOT NULL,
         heartbeat_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS front_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT NOT NULL,
+        message TEXT NOT NULL,
+        turn_ref TEXT,
+        created_at TEXT NOT NULL
+      );
     `);
     this.ensureColumn("tasks", "parent_thread_id", "TEXT");
     this.ensureColumn("goals", "completion_contract", "TEXT NOT NULL DEFAULT ''");
@@ -2730,6 +2784,16 @@ function ideaFromRow(row: SqlRow): Idea {
 
 export function ideaFingerprint(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, "-").slice(0, 120);
+}
+
+function frontMessageFromRow(row: SqlRow): FrontMessage {
+  return {
+    id: Number(row.id),
+    role: row.role === "front" ? "front" : "user",
+    message: String(row.message),
+    turnRef: nullableString(row.turn_ref),
+    createdAt: String(row.created_at),
+  };
 }
 
 function probeFromRow(row: SqlRow): GoalProbe {
