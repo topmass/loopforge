@@ -45,11 +45,19 @@ async function bootstrap() {
     // no backlog yet
   }
 
+  try {
+    const { messages } = await api.listFrontMessages();
+    useStore.getState().seedFront(messages);
+  } catch {
+    // no front transcript yet
+  }
+
   subscribe({
     onOpen: () => useStore.getState().setConn("live"),
     onError: () => useStore.getState().setConn("down"),
     onBoard: (b) => useStore.getState().applyBoard(b),
     onActivity: (e) => useStore.getState().applyActivity(e),
+    onFront: (m) => useStore.getState().applyFront(m),
   });
 }
 

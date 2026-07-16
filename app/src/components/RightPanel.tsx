@@ -8,7 +8,9 @@ export type RightTab = "detail" | "activity" | "diff";
 // (default) shows the selected task; Activity shows the lifecycle stream; Diff
 // shows the active goal's per-loop diff. The old logOpen toggle that swapped
 // whole panels is gone - the panel stays mounted and the tabs switch its content.
-export function RightPanel({ tab, onTab }: { tab: RightTab; onTab: (t: RightTab) => void }) {
+export function RightPanel(
+  { tab, onTab }: { tab: RightTab; onTab: (t: RightTab) => void },
+) {
   const tabClass = (active: boolean) =>
     `rounded-md px-3 py-1 text-xs font-medium transition ${
       active ? "bg-ink text-surface" : "text-ink-muted hover:text-ink"
@@ -30,11 +32,19 @@ export function RightPanel({ tab, onTab }: { tab: RightTab; onTab: (t: RightTab)
         >
           Activity
         </button>
-        <button type="button" onClick={() => onTab("diff")} className={tabClass(tab === "diff")}>
+        <button
+          type="button"
+          onClick={() => onTab("diff")}
+          className={tabClass(tab === "diff")}
+        >
           Diff
         </button>
       </div>
-      {tab === "activity" ? <ActivityDrawer /> : tab === "diff" ? <DiffPanel /> : <DetailPanel />}
+      {tab === "activity"
+        ? <ActivityDrawer />
+        : tab === "diff"
+        ? <DiffPanel />
+        : <DetailPanel />}
     </aside>
   );
 }

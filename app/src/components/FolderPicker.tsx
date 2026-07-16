@@ -143,7 +143,9 @@ export function FolderPicker(
             </button>
           ))}
           {dirs.length === 0 && !error && (
-            <div className="px-2 py-2 text-xs text-ink-faint">No sub-folders here.</div>
+            <div className="px-2 py-2 text-xs text-ink-faint">
+              No sub-folders here.
+            </div>
           )}
         </div>
 

@@ -68,7 +68,9 @@ export function DiffPanel() {
       if (seeded.current !== id) {
         seeded.current = id;
         setExpanded(
-          next.files.length <= AUTO_EXPAND_MAX ? new Set(next.files.map((f) => f.path)) : new Set(),
+          next.files.length <= AUTO_EXPAND_MAX
+            ? new Set(next.files.map((f) => f.path))
+            : new Set(),
         );
       }
     } catch (e) {
@@ -130,9 +132,15 @@ export function DiffPanel() {
         </div>
       )}
       <div className="flex-1 overflow-y-auto">
-        {error && <div className="px-4 py-3 text-center text-xs text-danger">{error}</div>}
+        {error && (
+          <div className="px-4 py-3 text-center text-xs text-danger">
+            {error}
+          </div>
+        )}
         {loading && !diff && (
-          <div className="py-10 text-center text-sm text-ink-faint">Loading diff...</div>
+          <div className="py-10 text-center text-sm text-ink-faint">
+            Loading diff...
+          </div>
         )}
         {diff?.note && <EmptyState text={diff.note} />}
         {diff && !diff.note && files.length === 0 && (
@@ -161,7 +169,11 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function FileSection(
-  { file, open, onToggle }: { file: GoalDiffFile; open: boolean; onToggle: () => void },
+  { file, open, onToggle }: {
+    file: GoalDiffFile;
+    open: boolean;
+    onToggle: () => void;
+  },
 ) {
   return (
     <div className="border-b border-line">
@@ -186,8 +198,12 @@ function FileSection(
             patch truncated
           </span>
         )}
-        <span className="shrink-0 font-mono text-xs text-ok">+{file.additions}</span>
-        <span className="shrink-0 font-mono text-xs text-danger">-{file.deletions}</span>
+        <span className="shrink-0 font-mono text-xs text-ok">
+          +{file.additions}
+        </span>
+        <span className="shrink-0 font-mono text-xs text-danger">
+          -{file.deletions}
+        </span>
       </button>
       {open && <PatchBody patch={file.patch} />}
     </div>
@@ -216,7 +232,9 @@ function PatchBody({ patch }: { patch: string }) {
           </div>
         );
       })}
-      {extra > 0 && <div className="px-4 py-1 text-ink-faint">... {extra} more lines</div>}
+      {extra > 0 && (
+        <div className="px-4 py-1 text-ink-faint">... {extra} more lines</div>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { create } from "zustand";
 import type {
   ActivityEvent,
   BoardSnapshot,
+  FrontMessage,
   LifecycleEvent,
   LoopStatus,
   PlanStep,
@@ -20,7 +21,9 @@ export type Theme = "light" | "dark";
 // First paint theme: a stored choice wins; otherwise Night Ops (dark) is the
 // flagship default, unless the OS explicitly prefers light.
 function initialTheme(): Theme {
-  const stored = typeof localStorage !== "undefined" ? localStorage.getItem("lf-theme") : null;
+  const stored = typeof localStorage !== "undefined"
+    ? localStorage.getItem("lf-theme")
+    : null;
   if (stored === "light" || stored === "dark") return stored;
   const prefersLight = typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-color-scheme: light)").matches;
@@ -44,7 +47,10 @@ interface AppState {
   planningByGoal: Record<string, boolean>;
   // Sub-agents spawned by the loop owner, per goal - distinct nodes in the
   // planet view (the main agent is the core; these are its satellites).
-  subagentsByGoal: Record<string, { title: string; state: "running" | "merged" }[]>;
+  subagentsByGoal: Record<
+    string,
+    { title: string; state: "running" | "merged" }[]
+  >;
   activeGoalId: string | null;
   selectedTaskId: string | null;
   // Last time a goal's loop emitted activity, so the UI can show "working"
@@ -52,6 +58,13 @@ interface AppState {
   loopActiveAt: Record<string, number>;
   // Latest per-iteration loop telemetry (loop.status events) per goal.
   loopStatusByGoal: Record<string, LoopStatus>;
+  // The chief-of-staff conversation (thread-first default center view).
+  frontMessages: FrontMessage[];
+  // True = the center shows the front thread; selecting a loop or All loops
+  // flips it off. Thread-first: this is the default on load.
+  frontSelected: boolean;
+  // A user message was sent and no front reply has arrived yet.
+  frontBusy: boolean;
 
   setConn: (c: ConnState) => void;
   setTheme: (t: Theme) => void;
@@ -62,6 +75,10 @@ interface AppState {
   setRuntime: (r: Runtime) => void;
   selectTask: (id: string | null) => void;
   setActiveGoal: (id: string | null) => void;
+  selectFront: () => void;
+  applyFront: (m: FrontMessage) => void;
+  seedFront: (ms: FrontMessage[]) => void;
+  setFrontBusy: (busy: boolean) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -79,6 +96,9 @@ export const useStore = create<AppState>((set) => ({
   selectedTaskId: null,
   loopActiveAt: {},
   loopStatusByGoal: {},
+  frontMessages: [],
+  frontSelected: true,
+  frontBusy: false,
 
   setConn: (conn) => set({ conn }),
 
@@ -105,6 +125,9 @@ export const useStore = create<AppState>((set) => ({
       subagentsByGoal: {},
       loopActiveAt: {},
       loopStatusByGoal: {},
+      frontMessages: [],
+      frontSelected: true,
+      frontBusy: false,
       activeGoalId: null,
       selectedTaskId: null,
     }),
@@ -137,7 +160,8 @@ export const useStore = create<AppState>((set) => ({
       };
       // Stamp loop liveness so the UI can show "working" before plan.updated.
       // Loop activity events prefix their message with the goal id.
-      const goalRef = lifecycle?.goalId ?? event.message.match(/^(GOAL-\d+)/)?.[1] ?? null;
+      const goalRef = lifecycle?.goalId ??
+        event.message.match(/^(GOAL-\d+)/)?.[1] ?? null;
       if (goalRef && (event.role === "loop" || event.role === "lifecycle")) {
         next.loopActiveAt = { ...state.loopActiveAt, [goalRef]: Date.now() };
       }
@@ -147,14 +171,20 @@ export const useStore = create<AppState>((set) => ({
         // lands (plan.updated) or the goal moves on (task/blocked/closed).
         if (lifecycle.goalId) {
           if (lifecycle.kind === "goal.planning") {
-            next.planningByGoal = { ...state.planningByGoal, [lifecycle.goalId]: true };
+            next.planningByGoal = {
+              ...state.planningByGoal,
+              [lifecycle.goalId]: true,
+            };
           } else if (
             lifecycle.kind === "plan.updated" ||
             lifecycle.kind === "task.added" ||
             lifecycle.kind === "goal.blocked" ||
             lifecycle.kind === "goal.closed"
           ) {
-            next.planningByGoal = { ...state.planningByGoal, [lifecycle.goalId]: false };
+            next.planningByGoal = {
+              ...state.planningByGoal,
+              [lifecycle.goalId]: false,
+            };
           }
         }
         // loop.status carries the loop's live telemetry for the board strip.
@@ -166,7 +196,9 @@ export const useStore = create<AppState>((set) => ({
               maxIterations: Number(lifecycle.data.maxIterations) || 0,
               tokensUsed: Number(lifecycle.data.tokensUsed) || 0,
               elapsedMs: Number(lifecycle.data.elapsedMs) || 0,
-              reason: typeof lifecycle.data.reason === "string" ? lifecycle.data.reason : "",
+              reason: typeof lifecycle.data.reason === "string"
+                ? lifecycle.data.reason
+                : "",
             },
           };
         }
@@ -177,19 +209,25 @@ export const useStore = create<AppState>((set) => ({
         }
         // Track spawned/merged subagents as persistent satellite nodes.
         if (
-          (lifecycle.kind === "subagent.spawned" || lifecycle.kind === "subagent.merged") &&
+          (lifecycle.kind === "subagent.spawned" ||
+            lifecycle.kind === "subagent.merged") &&
           lifecycle.goalId
         ) {
-          const title = (lifecycle.data.title as string) ?? lifecycle.taskId ?? lifecycle.summary;
+          const title = (lifecycle.data.title as string) ?? lifecycle.taskId ??
+            lifecycle.summary;
           const existing = state.subagentsByGoal[lifecycle.goalId] ?? [];
-          const state2: "running" | "merged" = lifecycle.kind === "subagent.merged"
-            ? "merged"
-            : "running";
+          const state2: "running" | "merged" =
+            lifecycle.kind === "subagent.merged" ? "merged" : "running";
           const found = existing.find((s) => s.title === title);
           const updated = found
-            ? existing.map((s) => (s.title === title ? { ...s, state: state2 } : s))
+            ? existing.map((
+              s,
+            ) => (s.title === title ? { ...s, state: state2 } : s))
             : [...existing, { title, state: state2 }];
-          next.subagentsByGoal = { ...state.subagentsByGoal, [lifecycle.goalId]: updated };
+          next.subagentsByGoal = {
+            ...state.subagentsByGoal,
+            [lifecycle.goalId]: updated,
+          };
         }
       }
       return next;
@@ -197,5 +235,21 @@ export const useStore = create<AppState>((set) => ({
 
   setRuntime: (runtime) => set({ runtime }),
   selectTask: (selectedTaskId) => set({ selectedTaskId }),
-  setActiveGoal: (activeGoalId) => set({ activeGoalId }),
+  // Choosing a loop (or All loops) leaves the front thread; choosing the
+  // Main agent returns to it. One coherent center at a time.
+  setActiveGoal: (activeGoalId) => set({ activeGoalId, frontSelected: false }),
+  selectFront: () => set({ frontSelected: true }),
+  applyFront: (message) =>
+    set((state) => {
+      if (state.frontMessages.some((m) => m.id === message.id)) {
+        return {};
+      }
+      return {
+        frontMessages: [...state.frontMessages.slice(-400), message],
+        // Any front-role arrival (reply or receipt) clears the busy shimmer.
+        frontBusy: message.role === "front" ? false : state.frontBusy,
+      };
+    }),
+  seedFront: (ms) => set({ frontMessages: ms.slice(-400) }),
+  setFrontBusy: (frontBusy) => set({ frontBusy }),
 }));

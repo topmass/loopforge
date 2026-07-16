@@ -26,7 +26,8 @@ function ProbeRow(
   const [label, setLabel] = useState(probe.label);
   const [command, setCommand] = useState(probe.command);
   const { armed, arm, disarm } = useArmedDelete();
-  const dirty = label.trim() !== probe.label || command.trim() !== probe.command;
+  const dirty = label.trim() !== probe.label ||
+    command.trim() !== probe.command;
 
   return (
     <div className="rounded-xl border border-line bg-surface-raised">
@@ -35,7 +36,11 @@ function ProbeRow(
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
       >
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${probeDot(probe.lastStatus)}`} />
+        <span
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+            probeDot(probe.lastStatus)
+          }`}
+        />
         <span className="min-w-0 flex-1 truncate text-ink">{probe.label}</span>
         <span className="shrink-0 text-[10px] uppercase tracking-wider text-ink-faint">
           {probe.lastStatus}
@@ -71,7 +76,11 @@ function ProbeRow(
             <button
               type="button"
               disabled={busy || !dirty || !label.trim() || !command.trim()}
-              onClick={() => onSave(probe.id, { label: label.trim(), command: command.trim() })}
+              onClick={() =>
+                onSave(probe.id, {
+                  label: label.trim(),
+                  command: command.trim(),
+                })}
               className="rounded-lg bg-accent-strong px-3 py-1 text-xs font-semibold text-on-accent transition hover:opacity-90 disabled:opacity-40"
             >
               Save
@@ -176,7 +185,11 @@ export function ProbePanel({ goalId, probes, loopLive }: {
                 disabled={busy || !newLabel.trim() || !newCommand.trim()}
                 onClick={() =>
                   void wrap(async () => {
-                    await api.addProbe(goalId, newLabel.trim(), newCommand.trim());
+                    await api.addProbe(
+                      goalId,
+                      newLabel.trim(),
+                      newCommand.trim(),
+                    );
                     setNewLabel("");
                     setNewCommand("");
                     setAdding(false);
@@ -207,7 +220,9 @@ export function ProbePanel({ goalId, probes, loopLive }: {
             <button
               type="button"
               disabled={busy || loopLive || probes.length === 0}
-              title={loopLive ? "The running loop re-checks these every turn." : undefined}
+              title={loopLive
+                ? "The running loop re-checks these every turn."
+                : undefined}
               onClick={() => void wrap(() => api.checkGoal(goalId))}
               className="rounded-lg border border-line px-3 py-1 text-xs text-ink-muted transition hover:bg-surface-sunken disabled:opacity-40"
             >

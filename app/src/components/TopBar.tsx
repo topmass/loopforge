@@ -18,7 +18,11 @@ export function TopBar(
   const activity = useStore((s) => s.activity);
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
-  const dot = conn === "live" ? "bg-ok" : conn === "down" ? "bg-danger" : "bg-warn";
+  const dot = conn === "live"
+    ? "bg-ok"
+    : conn === "down"
+    ? "bg-danger"
+    : "bg-warn";
 
   const role = (label: string, value: string, on = true) => (
     <button
@@ -87,7 +91,9 @@ export function TopBar(
       )}
       {now && (
         <span className="ml-2 flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS.live.dot}`} />
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS.live.dot}`}
+          />
           <span className="truncate">{now.message.slice(0, 90)}</span>
         </span>
       )}
@@ -106,7 +112,9 @@ export function TopBar(
           type="button"
           onClick={onActivity}
           className={`rounded-md border border-line px-3 py-1 text-xs ${
-            activityActive ? "bg-ink text-surface" : "text-ink-muted hover:text-ink"
+            activityActive
+              ? "bg-ink text-surface"
+              : "text-ink-muted hover:text-ink"
           }`}
         >
           Activity

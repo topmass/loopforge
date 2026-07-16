@@ -6,6 +6,7 @@ import type {
   ActivityEvent,
   BoardSnapshot,
   DirEntry,
+  FrontMessage,
   GoalDiff,
   GoalThread,
   LifecycleEvent,
@@ -79,7 +80,8 @@ export const api = {
   runtime: () => jsonFetch<Runtime>("/api/runtime"),
   // Projects: registry read/add and "open" (get the project server's URL,
   // spawning it if needed). All three hit the primary origin.
-  listProjects: () => primaryFetch<{ projects: ProjectEntry[] }>("/api/projects"),
+  listProjects: () =>
+    primaryFetch<{ projects: ProjectEntry[] }>("/api/projects"),
   addProject: (root: string) =>
     primaryFetch<{ projects: ProjectEntry[] }>("/api/projects", {
       method: "POST",
@@ -109,27 +111,39 @@ export const api = {
     jsonFetch<GoalDiff>(`/api/goals/${encodeURIComponent(goalId)}/diff`),
   // Start a fresh goal-loop from plain text (no active goal yet). The goal is
   // created immediately (planning: true) and the plan streams in afterwards.
-  startGoalLoop: (text: string, opts?: { hours?: number; questionMode?: boolean }) =>
+  startGoalLoop: (
+    text: string,
+    opts?: { hours?: number; questionMode?: boolean },
+  ) =>
     jsonFetch<{ goalId: string; planning: boolean }>("/api/goals/loop", {
       method: "POST",
       body: JSON.stringify({ text, ...opts }),
     }),
   // Add a task to a goal = steer it.
   addTask: (goalId: string, text: string) =>
-    jsonFetch<{ ok: boolean }>(`/api/goals/${encodeURIComponent(goalId)}/task`, {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    }),
+    jsonFetch<{ ok: boolean }>(
+      `/api/goals/${encodeURIComponent(goalId)}/task`,
+      {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      },
+    ),
   editObjective: (goalId: string, text: string) =>
-    jsonFetch<{ ok: boolean }>(`/api/goals/${encodeURIComponent(goalId)}/objective`, {
-      method: "POST",
-      body: JSON.stringify({ text }),
-    }),
+    jsonFetch<{ ok: boolean }>(
+      `/api/goals/${encodeURIComponent(goalId)}/objective`,
+      {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      },
+    ),
   loopExistingGoal: (goalId: string, opts?: { hours?: number }) =>
-    jsonFetch<{ ok: boolean }>(`/api/goals/${encodeURIComponent(goalId)}/loop`, {
-      method: "POST",
-      body: JSON.stringify({ ...opts }),
-    }),
+    jsonFetch<{ ok: boolean }>(
+      `/api/goals/${encodeURIComponent(goalId)}/loop`,
+      {
+        method: "POST",
+        body: JSON.stringify({ ...opts }),
+      },
+    ),
   // Restart a task - used to confirm a manual-verification hold (restart =
   // verified-by-hand, the worker resumes straight to merge).
   runTask: (taskId: string) =>
@@ -146,14 +160,28 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ backend }),
     }),
-  setRescue: (patch: { enabled?: boolean; backend?: string; afterAttempts?: number }) =>
-    jsonFetch<unknown>("/api/rescue", { method: "PATCH", body: JSON.stringify(patch) }),
+  setRescue: (
+    patch: { enabled?: boolean; backend?: string; afterAttempts?: number },
+  ) =>
+    jsonFetch<unknown>("/api/rescue", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   setPlanner: (patch: { enabled?: boolean; backend?: string }) =>
-    jsonFetch<unknown>("/api/planner", { method: "PATCH", body: JSON.stringify(patch) }),
+    jsonFetch<unknown>("/api/planner", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   setScout: (patch: { enabled?: boolean; backend?: string }) =>
-    jsonFetch<unknown>("/api/scout", { method: "PATCH", body: JSON.stringify(patch) }),
+    jsonFetch<unknown>("/api/scout", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   setPushBranches: (enabled: boolean) =>
-    jsonFetch<unknown>("/api/pushbranches", { method: "PATCH", body: JSON.stringify({ enabled }) }),
+    jsonFetch<unknown>("/api/pushbranches", {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
   setMaxAgents: (value: number) =>
     jsonFetch<{ maxParallelAgents: number }>("/api/maxagents", {
       method: "PATCH",
@@ -179,6 +207,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ label, command }),
     }),
+  // Front thread: the chief-of-staff conversation. Sending triggers a front
+  // turn server-side; the reply arrives over the "front" SSE event.
+  listFrontMessages: () =>
+    jsonFetch<
+      {
+        messages: FrontMessage[];
+        frontThreadId: string | null;
+        revision: number;
+      }
+    >(
+      "/api/front/messages",
+    ),
+  sendFrontMessage: (text: string) =>
+    jsonFetch<{ message: FrontMessage; revision: number }>(
+      "/api/front/messages",
+      {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      },
+    ),
   // Explicit merge approval for an attended hold - maps to the held task's
   // restart-to-merge path server-side. Never inferred from chat.
   approveMerge: (goalId: string) =>
@@ -187,17 +235,24 @@ export const api = {
       { method: "POST" },
     ),
   checkGoal: (goalId: string) =>
-    jsonFetch<{ goalId: string; total: number; passed: number; probes: Probe[] }>(
+    jsonFetch<
+      { goalId: string; total: number; passed: number; probes: Probe[] }
+    >(
       `/api/goals/${goalId}/check`,
       { method: "POST" },
     ),
   // Per-project codex power knobs: model, reasoning effort, fast mode. The
   // runtime line picks the new values up on the modal's refresh.
-  setConfig: (patch: { model?: string; reasoningEffort?: string; fastMode?: boolean }) =>
-    jsonFetch<{ model: string; reasoningEffort: string; fastMode: boolean }>("/api/config", {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
+  setConfig: (
+    patch: { model?: string; reasoningEffort?: string; fastMode?: boolean },
+  ) =>
+    jsonFetch<{ model: string; reasoningEffort: string; fastMode: boolean }>(
+      "/api/config",
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    ),
   // Machine-wide Claude model, patched through the same backends endpoint.
   setClaudeModel: (model: string) =>
     jsonFetch<{ claudeModel: string }>("/api/backend", {
@@ -213,13 +268,18 @@ export const api = {
   // The local backend's advanced pi provider/model override, same backends
   // endpoint. Empty strings clear the override (back to the local endpoint).
   setLocalPi: (patch: { provider?: string; model?: string }) =>
-    jsonFetch<{ localPiProvider: string; localPiModel: string }>("/api/backend", {
-      method: "PATCH",
-      body: JSON.stringify({
-        ...(patch.provider !== undefined ? { localPiProvider: patch.provider } : {}),
-        ...(patch.model !== undefined ? { localPiModel: patch.model } : {}),
-      }),
-    }),
+    jsonFetch<{ localPiProvider: string; localPiModel: string }>(
+      "/api/backend",
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...(patch.provider !== undefined
+            ? { localPiProvider: patch.provider }
+            : {}),
+          ...(patch.model !== undefined ? { localPiModel: patch.model } : {}),
+        }),
+      },
+    ),
   // Create a new folder inside `path` (the picker's current dir); returns the
   // created absolute path so the picker can navigate straight into it.
   makeDir: (path: string, name: string) =>
@@ -281,6 +341,7 @@ let activeSource: EventSource | null = null;
 export function subscribe(handlers: {
   onBoard: (b: BoardSnapshot) => void;
   onActivity: (e: ActivityEvent & { rawJson?: string | null }) => void;
+  onFront?: (m: FrontMessage) => void;
   onOpen: () => void;
   onError: () => void;
 }): () => void {
@@ -299,6 +360,13 @@ export function subscribe(handlers: {
   source.addEventListener("activity", (e) => {
     try {
       handlers.onActivity(JSON.parse((e as MessageEvent).data));
+    } catch {
+      // ignore
+    }
+  });
+  source.addEventListener("front", (e) => {
+    try {
+      handlers.onFront?.(JSON.parse((e as MessageEvent).data));
     } catch {
       // ignore
     }

@@ -11,6 +11,7 @@ import { BoardView } from "./components/BoardView";
 import { ThreadView } from "./components/ThreadView";
 import { RightPanel, type RightTab } from "./components/RightPanel";
 import { ChatBar } from "./components/ChatBar";
+import { FrontThreadView } from "./components/FrontThreadView";
 
 // The three-panel shell: TopBar / (Sidebar | center tabs + Board|Thread | right
 // panel) / ChatBar. Layout + the project-switch reconnect effect + tab state
@@ -23,6 +24,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [centerTab, setCenterTab] = useState<CenterTab>("board");
   const [rightTab, setRightTab] = useState<RightTab>("detail");
+  const frontSelected = useStore((s) => s.frontSelected);
   const activeGoal = board?.goals.find((g) => g.id === activeGoalId) ?? null;
   const firstRun = useRef(true);
 
@@ -82,11 +84,17 @@ export function App() {
         // no backlog on the new project yet
       }
     })();
+    void api.listFrontMessages().then(({ messages }) => {
+      useStore.getState().seedFront(messages);
+    }).catch(() => {
+      // the switched-to server may still be starting
+    });
     return subscribe({
       onOpen: () => useStore.getState().setConn("live"),
       onError: () => useStore.getState().setConn("down"),
       onBoard: (b) => useStore.getState().applyBoard(b),
       onActivity: (e) => useStore.getState().applyActivity(e),
+      onFront: (m) => useStore.getState().applyFront(m),
     });
   }, [apiBase]);
 
@@ -98,19 +106,36 @@ export function App() {
         activityActive={rightTab === "activity"}
       />
       <AnimatePresence>
-        {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && (
+          <SettingsModal onClose={() => setSettingsOpen(false)} />
+        )}
       </AnimatePresence>
       <AlertsBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-h-0 flex-1 flex-col">
-          <CenterTabs tab={centerTab} onTab={setCenterTab} />
-          {centerTab === "board" ? <BoardView /> : <ThreadView goal={activeGoal} />}
+          {
+            /* Thread-first: the front conversation is the default center; the
+              Board/Thread tabs appear once a loop (or All loops) is selected. */
+          }
+          {frontSelected ? <FrontThreadView /> : (
+            <>
+              <CenterTabs tab={centerTab} onTab={setCenterTab} />
+              {centerTab === "board"
+                ? <BoardView />
+                : <ThreadView goal={activeGoal} />}
+            </>
+          )}
         </main>
         <RightPanel tab={rightTab} onTab={setRightTab} />
       </div>
-      {/* Board tab keeps the global composer; Thread has its own inline one. */}
-      {centerTab === "board" && <ChatBar goal={activeGoal} />}
+      {
+        /* The front view and Board tab keep the global composer; the goal
+          Thread has its own inline one. */
+      }
+      {(frontSelected || centerTab === "board") && (
+        <ChatBar goal={frontSelected ? null : activeGoal} />
+      )}
     </div>
   );
 }

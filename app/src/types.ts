@@ -32,6 +32,16 @@ export interface LifecycleEvent {
   data: Record<string, unknown>;
 }
 
+// One message in the front thread - the chief-of-staff conversation. Receipts
+// (loop outcomes, delegation confirmations) arrive as role "front" too.
+export interface FrontMessage {
+  id: number;
+  role: "user" | "front";
+  message: string;
+  turnRef: string | null;
+  createdAt: string;
+}
+
 // Per-iteration loop telemetry from loop.status lifecycle events - the GUI's
 // "iter 4 · 12k tok · 8m · waiting on: ..." strip.
 export interface LoopStatus {

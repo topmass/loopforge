@@ -64,7 +64,13 @@
     "Segoe UI",
     Roboto,
     sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono:
+    "JetBrains Mono",
+    ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 /* Paper Terminal (light) - the underlying values. */
@@ -201,7 +207,9 @@ body {
 .card {
   background: var(--t-surface-raised);
   border: 1px solid var(--t-line);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 14px 30px -20px rgba(16, 24, 40, 0.28);
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 14px 30px -20px rgba(16, 24, 40, 0.28);
 }
 
 /* Flat translucent surface for chrome (bars, sidebar) over the canvas. */

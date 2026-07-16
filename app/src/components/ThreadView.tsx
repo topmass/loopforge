@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -51,7 +57,14 @@ function stripGoalPrefix(text: string): string {
   return text.replace(/^GOAL-\d+:\s*/, "");
 }
 
-type EntryRender = "user" | "agent" | "tool" | "task" | "fanout" | "chip" | "skip";
+type EntryRender =
+  | "user"
+  | "agent"
+  | "tool"
+  | "task"
+  | "fanout"
+  | "chip"
+  | "skip";
 
 function classify(e: ThreadEntry): EntryRender {
   if (e.role.startsWith("fanout:")) return "fanout";
@@ -64,7 +77,10 @@ function classify(e: ThreadEntry): EntryRender {
 }
 
 function chipTone(kind: string): string {
-  if (["verified", "goal.closed", "subagent.merged", "merge", "finished"].includes(kind)) {
+  if (
+    ["verified", "goal.closed", "subagent.merged", "merge", "finished"]
+      .includes(kind)
+  ) {
     return "border-ok bg-ok-soft text-ok-ink";
   }
   if (["goal.blocked", "blocked", "hold"].includes(kind)) {
@@ -143,7 +159,8 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    const near =
+      el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
     atBottomRef.current = near;
     setAtBottom(near);
   };
@@ -183,10 +200,18 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
         </div>
       )}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-4">
-          {error && <div className="mb-3 text-center text-xs text-danger">{error}</div>}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="flex-1 overflow-y-auto px-4 py-4"
+        >
+          {error && (
+            <div className="mb-3 text-center text-xs text-danger">{error}</div>
+          )}
           {loading && !thread && (
-            <div className="py-10 text-center text-sm text-ink-faint">Loading thread...</div>
+            <div className="py-10 text-center text-sm text-ink-faint">
+              Loading thread...
+            </div>
           )}
           {emptyThread && (
             <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-ink-muted">
@@ -201,7 +226,9 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
                 {turn.entries.map((entry) => {
                   // Skip rows render nothing; excluding them here keeps the flex
                   // gap from opening a phantom slot for an empty motion wrapper.
-                  if (classify(entry) === "skip") return null;
+                  if (classify(entry) === "skip") {
+                    return null;
+                  }
                   return (
                     <motion.div
                       key={entry.id}
@@ -243,14 +270,20 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
   );
 }
 
-function TurnSeparator({ index, startedAt }: { index: number; startedAt: string | null }) {
+function TurnSeparator(
+  { index, startedAt }: { index: number; startedAt: string | null },
+) {
   const when = relTime(startedAt);
   return (
     <div className="flex items-center gap-3 py-1 text-[11px] uppercase tracking-[0.18em] text-ink-faint">
       <span className="h-px flex-1 bg-line" />
       <span>
         {index === 0 ? "setup" : `turn ${index}`}
-        {when && <span className="ml-2 lowercase tracking-normal text-ink-faint">{when}</span>}
+        {when && (
+          <span className="ml-2 lowercase tracking-normal text-ink-faint">
+            {when}
+          </span>
+        )}
       </span>
       <span className="h-px flex-1 bg-line" />
     </div>
@@ -258,7 +291,11 @@ function TurnSeparator({ index, startedAt }: { index: number; startedAt: string 
 }
 
 function EntryRow(
-  { entry, open, onToggle }: { entry: ThreadEntry; open: boolean; onToggle: () => void },
+  { entry, open, onToggle }: {
+    entry: ThreadEntry;
+    open: boolean;
+    onToggle: () => void;
+  },
 ) {
   const type = classify(entry);
   switch (type) {
@@ -281,7 +318,9 @@ function EntryRow(
 
     case "agent": {
       const long = entry.text.length > AGENT_COLLAPSE;
-      const shown = long && !open ? entry.text.slice(0, AGENT_COLLAPSE) : entry.text;
+      const shown = long && !open
+        ? entry.text.slice(0, AGENT_COLLAPSE)
+        : entry.text;
       return (
         // A filled accent dot marks the owning agent's prose.
         <div className="flex justify-start gap-2">
@@ -290,7 +329,10 @@ function EntryRow(
             aria-hidden="true"
           />
           <div className="max-w-[85%] rounded-2xl border border-line bg-surface-raised px-4 py-3 text-sm leading-relaxed text-ink shadow-sm">
-            <div className="whitespace-pre-wrap">{shown}{long && !open ? "..." : ""}</div>
+            <div className="whitespace-pre-wrap">
+              {shown}
+              {long && !open ? "..." : ""}
+            </div>
             {long && (
               <button
                 type="button"
@@ -327,7 +369,9 @@ function EntryRow(
       return (
         <div className="flex items-start gap-2 text-xs text-ink-muted">
           <span className="mt-px shrink-0">{"☐"}</span>
-          <span className="min-w-0 flex-1 truncate">{stripGoalPrefix(entry.text)}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {stripGoalPrefix(entry.text)}
+          </span>
         </div>
       );
 
@@ -341,7 +385,10 @@ function EntryRow(
           onClick={onToggle}
           className="flex w-full items-start gap-2 text-left"
         >
-          <span className={`mt-1 h-2 w-2 shrink-0 ${tint}`} aria-hidden="true" />
+          <span
+            className={`mt-1 h-2 w-2 shrink-0 ${tint}`}
+            aria-hidden="true"
+          />
           <span className="flex min-w-0 flex-1 flex-col items-start">
             <span className="w-full truncate text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
               {title}

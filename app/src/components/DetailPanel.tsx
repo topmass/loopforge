@@ -23,16 +23,24 @@ export function DetailPanel() {
 
   // The board is project-wide, so a selected card can belong to any goal - look
   // it up by title across every goal's plan / sub-agents, not just the active.
-  const step = Object.values(planByGoal).flat().find((s) => s.title === selectedTaskId);
-  const sub = Object.values(subagentsByGoal).flat().find((s) => s.title === selectedTaskId);
+  const step = Object.values(planByGoal).flat().find((s) =>
+    s.title === selectedTaskId
+  );
+  const sub = Object.values(subagentsByGoal).flat().find((s) =>
+    s.title === selectedTaskId
+  );
   const isSub = Boolean(sub);
   const related = lifecycle
-    .filter((e) => e.taskId === selectedTaskId || e.data?.title === selectedTaskId)
+    .filter((e) =>
+      e.taskId === selectedTaskId || e.data?.title === selectedTaskId
+    )
     .slice(-20);
   // For a sub-agent, the agent's recorded note is the latest merge/progress
   // summary it reported back (its plan steps have no inline note field).
   const subNote = isSub
-    ? related.filter((e) => e.kind === "subagent.merged" || e.kind === "subagent.progress").at(-1)
+    ? related.filter((e) =>
+      e.kind === "subagent.merged" || e.kind === "subagent.progress"
+    ).at(-1)
       ?.summary ?? null
     : null;
 
@@ -52,7 +60,9 @@ export function DetailPanel() {
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
             {isSub ? "Sub-agent" : "Task"}
           </div>
-          <div className="truncate text-sm font-semibold text-ink">{selectedTaskId}</div>
+          <div className="truncate text-sm font-semibold text-ink">
+            {selectedTaskId}
+          </div>
         </div>
         <button
           type="button"
@@ -75,13 +85,16 @@ export function DetailPanel() {
             <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
               What the agent recorded
             </div>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{step?.note ?? subNote}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
+              {step?.note ?? subNote}
+            </p>
           </div>
         )}
 
         {isSub && (
           <div className="mt-3 rounded-md border border-voice-2 bg-voice-2/10 p-2 text-xs text-ink-muted">
-            Runs in its own worktree/branch, then merges back into the goal branch.
+            Runs in its own worktree/branch, then merges back into the goal
+            branch.
             {sub!.state === "merged" ? " Merged ✓" : " Working now…"}
           </div>
         )}

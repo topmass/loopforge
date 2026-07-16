@@ -18,6 +18,9 @@ export function Sidebar() {
   const board = useStore((s) => s.board);
   const activeGoalId = useStore((s) => s.activeGoalId);
   const setActiveGoal = useStore((s) => s.setActiveGoal);
+  const frontSelected = useStore((s) => s.frontSelected);
+  const frontBusy = useStore((s) => s.frontBusy);
+  const selectFront = useStore((s) => s.selectFront);
   const loopActiveAt = useStore((s) => s.loopActiveAt);
   const lifecycle = useStore((s) => s.lifecycle);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -68,7 +71,8 @@ export function Sidebar() {
   // server, the entry whose live URL matches apiBase; on the primary origin, the
   // entry the primary server flagged as current.
   const activeRoot = apiBase
-    ? projects.find((p) => p.url && new URL(p.url).origin === apiBase)?.root ?? null
+    ? projects.find((p) => p.url && new URL(p.url).origin === apiBase)?.root ??
+      null
     : projects.find((p) => p.current)?.root ?? null;
 
   const switchTo = async (root: string) => {
@@ -143,7 +147,9 @@ export function Sidebar() {
         <span className="shrink-0 rounded-full bg-surface-sunken px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-muted">
           {g.id}
         </span>
-        <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">{g.text}</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
+          {g.text}
+        </span>
         {/* Same arm-then-confirm delete as the goal chips. */}
         <span
           role="button"
@@ -209,7 +215,10 @@ export function Sidebar() {
                   >
                     {p.name}
                   </span>
-                  <span className="block truncate text-[11px] text-ink-muted" title={p.root}>
+                  <span
+                    className="block truncate text-[11px] text-ink-muted"
+                    title={p.root}
+                  >
                     {p.root}
                   </span>
                 </span>
@@ -237,6 +246,25 @@ export function Sidebar() {
           })}
         </div>
 
+        {/* Thread-first: the chief-of-staff conversation is the pinned default. */}
+        <div className="px-3 pt-3">
+          <button
+            type="button"
+            onClick={() => selectFront()}
+            className={`flex w-full items-center gap-2 rounded-2xl border px-3 py-2 text-left text-sm font-medium transition-colors ${
+              frontSelected
+                ? "border-accent bg-accent-soft text-accent-ink shadow-sm"
+                : "border-line bg-surface-raised text-ink hover:bg-surface-sunken"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                frontBusy ? STATUS.live.dot : "bg-ink-faint"
+              }`}
+            />
+            Main agent
+          </button>
+        </div>
         <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
           Loops
         </div>
@@ -256,7 +284,7 @@ export function Sidebar() {
               type="button"
               onClick={() => setActiveGoal(null)}
               className={`flex w-full items-center rounded-2xl border px-3 py-1.5 text-left text-[11px] font-medium uppercase tracking-wider transition-colors ${
-                activeGoalId === null
+                activeGoalId === null && !frontSelected
                   ? "border-accent bg-accent-soft text-accent-ink shadow-sm"
                   : "border-line bg-surface-sunken text-ink-faint hover:text-ink-muted"
               }`}
@@ -273,10 +301,13 @@ export function Sidebar() {
                 className="flex w-full items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-ink-faint transition hover:text-ink-muted"
               >
                 <span>{historyOpen ? "▾" : "▸"}</span>
-                history <span className="text-ink-faint">{closedGoals.length}</span>
+                history{" "}
+                <span className="text-ink-faint">{closedGoals.length}</span>
               </button>
               {historyOpen && (
-                <div className="mt-1 space-y-1">{closedGoals.map(renderLoopRow)}</div>
+                <div className="mt-1 space-y-1">
+                  {closedGoals.map(renderLoopRow)}
+                </div>
               )}
             </div>
           )}

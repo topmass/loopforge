@@ -11,7 +11,10 @@ type Tone = { label: string; className: string };
 // you"/"stale" reads identically to the same state on the board and sidebar.
 // test_failed is the one danger tone STATUS has no key for, so it stays local.
 const RISK_TONES: Record<Exclude<AgentRisk, "none">, Tone> = {
-  test_failed: { label: "tests failed", className: "border-danger bg-danger-soft text-danger-ink" },
+  test_failed: {
+    label: "tests failed",
+    className: "border-danger bg-danger-soft text-danger-ink",
+  },
   conflict: { label: "conflict", className: STATUS.blocked.pill },
   needs_user: { label: "needs you", className: STATUS.live.pill },
   stale: { label: "stale", className: STATUS.idle.pill },
@@ -44,7 +47,9 @@ export function workerChips(
   const dispatcher = (agentStatuses ?? []).map((worker): WorkerChip => ({
     key: `task:${worker.taskId}`,
     label: worker.taskId,
-    detail: worker.headline ? `${worker.phase} · ${worker.headline}` : worker.phase,
+    detail: worker.headline
+      ? `${worker.phase} · ${worker.headline}`
+      : worker.phase,
     tone: riskTone(worker.risk),
     taskId: worker.taskId,
   }));

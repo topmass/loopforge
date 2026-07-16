@@ -11,7 +11,9 @@ export function AlertsBar() {
   const lifecycle = useStore((s) => s.lifecycle);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const holds = (board?.tasks ?? []).filter((t) => t.currentGate === "manual-verification");
+  const holds = (board?.tasks ?? []).filter((t) =>
+    t.currentGate === "manual-verification"
+  );
   const closedGoals = new Set(
     (board?.goals ?? []).filter((g) => g.status === "closed").map((g) => g.id),
   );
@@ -26,7 +28,9 @@ export function AlertsBar() {
     if (e.kind === "goal.blocked") lastBlockedIdx.set(e.goalId, i);
   });
   const blocked = [...lastBlockedIdx.entries()]
-    .filter(([goalId, i]) => !closedGoals.has(goalId) && lastEventIdx.get(goalId) === i)
+    .filter(([goalId, i]) =>
+      !closedGoals.has(goalId) && lastEventIdx.get(goalId) === i
+    )
     .map(([, i]) => lifecycle[i])
     .slice(-3);
 
@@ -44,7 +48,10 @@ export function AlertsBar() {
   return (
     <div className="border-b border-warn bg-warn-soft">
       {blocked.map((e, i) => (
-        <div key={`b-${i}`} className="flex items-start gap-2 px-4 py-2 text-sm">
+        <div
+          key={`b-${i}`}
+          className="flex items-start gap-2 px-4 py-2 text-sm"
+        >
           <span
             className={`mt-px shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${STATUS.blocked.pill}`}
           >
@@ -65,7 +72,8 @@ export function AlertsBar() {
           </span>
           <button
             type="button"
-            onClick={() => void signOff(t.id)}
+            onClick={() =>
+              void signOff(t.id)}
             disabled={busy === t.id}
             className="rounded-md bg-ok-strong px-3 py-1 text-xs font-medium text-on-accent disabled:opacity-50"
           >
