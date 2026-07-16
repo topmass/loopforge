@@ -98,7 +98,7 @@ Deno.test("the lock releases when the work throws, and waiting times out cleanly
     await assertRejects(
       () => withRepoLock(store, root, "impatient", async () => {}, { timeoutMs: 80, pollMs: 20 }),
       Error,
-      "Timed out waiting for the repository lock",
+      "Timed out waiting for the repo:",
     );
     await blocker;
   } finally {

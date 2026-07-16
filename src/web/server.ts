@@ -158,7 +158,21 @@ export function startServer(
   let queueRunning = false;
   let pursueRunning = false;
   let scoutRunning = false;
-  let goalLoopRunning = false;
+  // Per-goal loop registry (thread-first step 5): one runner per goal and a
+  // bounded total, instead of the old project-wide single-flow boolean. The
+  // "planning" phase covers the kickoff window before the runner exists so a
+  // duplicate POST cannot slip through while the planner works.
+  const activeLoops = new Map<string, { startedAt: number; phase: "planning" | "running" }>();
+  const loopCapacity = () => Math.max(1, readWorkflow(normalizedRoot).maxConcurrentAgents);
+  const admitLoop = (goalId: string): string | null => {
+    if (activeLoops.has(goalId)) {
+      return `${goalId} already has a running loop.`;
+    }
+    if (activeLoops.size >= loopCapacity()) {
+      return `Loop capacity reached (${activeLoops.size} running); wait for one to finish or raise agent.max_concurrent_agents in WORKFLOW.md.`;
+    }
+    return null;
+  };
 
   const send = (client: Client, type: string, payload: unknown) => {
     try {
@@ -260,16 +274,14 @@ export function startServer(
       maxIterations?: number;
       questionMode?: boolean;
     } = {},
-    // The kickoff flow holds goalLoopRunning across planning already, so it asks
-    // to skip the guard rather than re-acquire it.
-    alreadyRunning = false,
+    // The kickoff flow admits the goal before planning, so it asks to skip
+    // admission rather than re-acquire it.
+    alreadyAdmitted = false,
   ): boolean => {
-    if (!alreadyRunning) {
-      if (goalLoopRunning) {
-        return false;
-      }
-      goalLoopRunning = true;
+    if (!alreadyAdmitted && admitLoop(goalId) !== null) {
+      return false;
     }
+    activeLoops.set(goalId, { startedAt: Date.now(), phase: "running" });
     queueMicrotask(() => {
       const runner = new GoalLoopRunner(normalizedRoot, store, {
         ...opts,
@@ -277,10 +289,10 @@ export function startServer(
         createCodexClient: options.createCodexClient,
       });
       runner.run(goalId).then(() => {
-        goalLoopRunning = false;
+        activeLoops.delete(goalId);
         broadcastBoard();
       }).catch((error) => {
-        goalLoopRunning = false;
+        activeLoops.delete(goalId);
         broadcast("error", { message: error instanceof Error ? error.message : String(error) });
       });
     });
@@ -488,7 +500,7 @@ export function startServer(
                 lights: probeLights(probes),
               },
               loop: {
-                running: goalLoopRunning && goal.status === "open",
+                running: activeLoops.has(goal.id) && goal.status === "open",
                 worktree: goal.loopWorktree ?? null,
                 branch: goal.loopBranch ?? null,
               },
@@ -992,11 +1004,12 @@ export function startServer(
         const checkMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/check$/);
         if (checkMatch && request.method === "POST") {
           const goalId = decodeURIComponent(checkMatch[1]);
-          // A running loop re-checks probes itself every turn; a concurrent
-          // manual run could collide with it (port-binding probes especially).
-          if (goalLoopRunning) {
+          // This goal's own loop re-checks probes every turn; a concurrent
+          // manual run of the SAME goal is redundant and can collide. Other
+          // goals' checks are fine - the probe lease serializes actual runs.
+          if (activeLoops.has(goalId)) {
             return json({
-              error: "A goal loop is running; it re-checks win conditions every turn.",
+              error: `${goalId}'s loop is running; it re-checks win conditions every turn.`,
             }, 409);
           }
           // Probes must run where the work actually is: an unmerged loop's
@@ -1270,8 +1283,11 @@ export function startServer(
         }
 
         if (url.pathname === "/api/goals/loop" && request.method === "POST") {
-          if (goalLoopRunning) {
-            return json({ error: "A goal loop is already running." }, 409);
+          if (activeLoops.size >= loopCapacity()) {
+            return json({
+              error:
+                `Loop capacity reached (${activeLoops.size} running); wait for one to finish or raise agent.max_concurrent_agents in WORKFLOW.md.`,
+            }, 409);
           }
           const body = await readJson<
             {
@@ -1286,15 +1302,16 @@ export function startServer(
           if (!text) {
             return json({ error: "Goal text is required." }, 400);
           }
-          // Hold the single-flow lock across planning AND the loop so a second
-          // POST during the minutes-long planning turn is rejected. Released on
-          // every failure path below and when the loop finishes. Rechecked here
-          // because reading the body awaited - two POSTs can interleave past the
-          // entry check.
-          if (goalLoopRunning) {
-            return json({ error: "A goal loop is already running." }, 409);
+          // Re-check capacity after the awaited body read - two POSTs can
+          // interleave past the entry check. The goal is registered as
+          // "planning" right after creation below, holding its slot across the
+          // minutes-long planning turn.
+          if (activeLoops.size >= loopCapacity()) {
+            return json({
+              error:
+                `Loop capacity reached (${activeLoops.size} running); wait for one to finish or raise agent.max_concurrent_agents in WORKFLOW.md.`,
+            }, 409);
           }
-          goalLoopRunning = true;
           const opts = {
             hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
             tokenBudget: typeof body.tokens === "number" && body.tokens > 0
@@ -1309,6 +1326,7 @@ export function startServer(
           // start the loop after responding - the planning turn no longer blocks
           // the request.
           const goal = store.createBareGoal(text);
+          activeLoops.set(goal.id, { startedAt: Date.now(), phase: "planning" });
           broadcastActivity(store.appendLifecycleEvent({
             kind: "goal.planning",
             goalId: goal.id,
@@ -1334,7 +1352,7 @@ export function startServer(
               broadcastBoard();
               launchGoalLoop(goal.id, opts, true);
             } catch (error) {
-              goalLoopRunning = false;
+              activeLoops.delete(goal.id);
               const message = error instanceof Error ? error.message : String(error);
               broadcastActivity(store.appendLifecycleEvent({
                 kind: "goal.blocked",
@@ -1392,15 +1410,18 @@ export function startServer(
 
         const loopMatch = url.pathname.match(/^\/api\/goals\/([^/]+)\/loop$/);
         if (loopMatch && request.method === "POST") {
-          if (goalLoopRunning) {
-            return json({ error: "A goal loop is already running." }, 409);
-          }
           const goalId = decodeURIComponent(loopMatch[1]).toUpperCase();
           store.getGoal(goalId);
+          const denied = admitLoop(goalId);
+          if (denied) {
+            return json({ error: denied }, 409);
+          }
           const body = await readJson<
             { hours?: number; tokens?: number; iterations?: number; questionMode?: boolean }
           >(request);
-          launchGoalLoop(goalId, {
+          // launchGoalLoop re-checks admission synchronously: two POSTs that
+          // interleaved across the awaited body read cannot both start.
+          const launched = launchGoalLoop(goalId, {
             hours: typeof body.hours === "number" && body.hours > 0 ? body.hours : undefined,
             tokenBudget: typeof body.tokens === "number" && body.tokens > 0
               ? body.tokens
@@ -1410,6 +1431,9 @@ export function startServer(
               : undefined,
             questionMode: body.questionMode === true,
           });
+          if (!launched) {
+            return json({ error: admitLoop(goalId) ?? "Loop admission failed." }, 409);
+          }
           return json({ ok: true, goalId, running: true });
         }
 

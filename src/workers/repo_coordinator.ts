@@ -25,6 +25,9 @@ export function repoLockKey(root: string): string {
   return `repo:${root}`;
 }
 
+// Root git mutations queue on repo:<root>; probe execution queues separately
+// on probes:<root> so port-binding probes from concurrent loops never collide
+// while merges and probe runs (different resources) stay independent.
 export async function withRepoLock<T>(
   store: LeaseStore,
   root: string,
@@ -32,13 +35,22 @@ export async function withRepoLock<T>(
   fn: () => Promise<T>,
   opts: RepoLockOptions = {},
 ): Promise<T> {
-  const key = repoLockKey(root);
+  return await withLease(store, repoLockKey(root), label, fn, opts);
+}
+
+export async function withLease<T>(
+  store: LeaseStore,
+  key: string,
+  label: string,
+  fn: () => Promise<T>,
+  opts: RepoLockOptions = {},
+): Promise<T> {
   const holder = `${label}-${Deno.pid}-${crypto.randomUUID()}`;
   const staleMs = opts.staleMs ?? STALE_MS;
   const deadlineAt = Date.now() + (opts.timeoutMs ?? 120_000);
   while (!store.acquireLease(key, holder, staleMs)) {
     if (Date.now() >= deadlineAt) {
-      throw new Error(`Timed out waiting for the repository lock (${label} on ${root}).`);
+      throw new Error(`Timed out waiting for the ${key} lease (${label}).`);
     }
     await new Promise((resolve) => setTimeout(resolve, opts.pollMs ?? 150));
   }

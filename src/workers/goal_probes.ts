@@ -4,6 +4,7 @@
 // every probe passes.
 
 import { BoardStore } from "../board/store.ts";
+import { withLease } from "./repo_coordinator.ts";
 import { GoalProbe } from "../board/types.ts";
 
 export interface ProbeRunResult {
@@ -24,36 +25,41 @@ export async function runGoalProbes(
   goalId: string,
   cwd = root,
 ): Promise<ProbeSummary> {
-  const probes = store.listProbes(goalId);
-  const results: ProbeRunResult[] = [];
-  for (const probe of probes) {
-    const result = await runProbeCommand(cwd, probe);
-    // Probes are editable from the GUI while a run is in flight. Only record
-    // the result if the check is still the one we actually ran: an edit mid-
-    // run reset the row to pending (don't stamp a stale verdict on the new
-    // command), a deleted row drops out of the summary entirely, and an
-    // edited probe counts as not-passed this run so a stale green can never
-    // satisfy the completion gate before the new command has actually run.
-    const current = store.getProbe(probe.id);
-    if (!current) {
-      continue;
+  // Serialize probe execution project-wide: probes bind ports and fixtures,
+  // and with per-goal loops running concurrently two goals' checks would
+  // otherwise collide. Probes are timeout-bounded, so waits stay short.
+  return await withLease(store, `probes:${root}`, `probes-${goalId}`, async () => {
+    const probes = store.listProbes(goalId);
+    const results: ProbeRunResult[] = [];
+    for (const probe of probes) {
+      const result = await runProbeCommand(cwd, probe);
+      // Probes are editable from the GUI while a run is in flight. Only record
+      // the result if the check is still the one we actually ran: an edit mid-
+      // run reset the row to pending (don't stamp a stale verdict on the new
+      // command), a deleted row drops out of the summary entirely, and an
+      // edited probe counts as not-passed this run so a stale green can never
+      // satisfy the completion gate before the new command has actually run.
+      const current = store.getProbe(probe.id);
+      if (!current) {
+        continue;
+      }
+      if (current.command === probe.command && current.expectContains === probe.expectContains) {
+        store.recordProbeResult(probe.id, result.passed ? "passed" : "failed", result.output);
+        results.push({ ...result, probe: store.getProbe(probe.id) ?? probe });
+      } else {
+        results.push({
+          probe: current,
+          passed: false,
+          output: "Probe was edited while this run was in flight; result discarded.",
+        });
+      }
     }
-    if (current.command === probe.command && current.expectContains === probe.expectContains) {
-      store.recordProbeResult(probe.id, result.passed ? "passed" : "failed", result.output);
-      results.push({ ...result, probe: store.getProbe(probe.id) ?? probe });
-    } else {
-      results.push({
-        probe: current,
-        passed: false,
-        output: "Probe was edited while this run was in flight; result discarded.",
-      });
-    }
-  }
-  return {
-    total: results.length,
-    passed: results.filter((result) => result.passed).length,
-    results,
-  };
+    return {
+      total: results.length,
+      passed: results.filter((result) => result.passed).length,
+      results,
+    };
+  }, { timeoutMs: 600_000 });
 }
 
 // setsid puts each probe in its own process group so a timeout can reap

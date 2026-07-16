@@ -9,6 +9,7 @@ import {
 } from "../src/workers/codex_app_server.ts";
 import { startServer } from "../src/web/server.ts";
 import { BoardStore } from "../src/board/store.ts";
+import { setWorkflowMaxConcurrentAgents } from "../src/workflow/workflow.ts";
 
 Deno.test("server exposes board, creates goals, and runs Codex worker", async () => {
   const root = Deno.makeTempDirSync();
@@ -1058,10 +1059,13 @@ class DeferredPlanLoopClient extends TestCodexClient {
   }
 }
 
-Deno.test("goal loop kickoff creates the goal before planning and rejects a second start", async () => {
+Deno.test("goal loop kickoff creates the goal before planning and rejects a second start at capacity", async () => {
   const root = Deno.makeTempDirSync();
   await git(root, ["init", "-b", "main"]);
   await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  // Capacity 1 restores the old single-flow behavior this test pins; the
+  // default capacity now admits independent goals concurrently.
+  setWorkflowMaxConcurrentAgents(root, 1);
   const port = 50933 + Math.floor(Math.random() * 300);
   let releasePlan: () => void = () => {};
   const planGate = new Promise<void>((resolve) => {
@@ -1754,5 +1758,109 @@ Deno.test("server edits, adds, deletes, and re-runs probes in the loop worktree"
     await server.finished.catch(() => {});
     await Deno.remove(root, { recursive: true }).catch(() => {});
     await Deno.remove(worktree, { recursive: true }).catch(() => {});
+  }
+});
+
+// A loop-capable client for concurrency tests: plans one task with a probe,
+// then satisfies the probe and declares completion on the first loop turn.
+class ConcurrentLoopClient extends TestCodexClient {
+  override async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    if (input.title === "LoopForge goal compiler") {
+      this.onEvent({
+        taskId: null,
+        runId: null,
+        role: "codex",
+        kind: "agent",
+        message: JSON.stringify({
+          completionContract: "- done.txt exists.",
+          probes: [{ label: "done exists", command: "test -f done.txt" }],
+          tasks: [{
+            title: "Write done.txt",
+            prompt: "Create done.txt.",
+            acceptanceCriteria: "- done.txt exists.",
+            priority: 200,
+            workpad: "Compiled task.",
+          }],
+        }),
+      });
+      return {
+        threadId: session.threadId,
+        turnId: "turn-concurrent-plan",
+        status: "completed",
+        completed: true,
+      };
+    }
+    if (/^GOAL-\d+: loop /.test(input.title)) {
+      await Deno.writeTextFile(`${session.cwd}/done.txt`, "done\n");
+      this.onEvent({
+        taskId: null,
+        runId: null,
+        role: "codex",
+        kind: "agent",
+        message: "All work finished.\nLOOP_COMPLETE",
+      });
+      return {
+        threadId: session.threadId,
+        turnId: "turn-concurrent-loop",
+        status: "completed",
+        completed: true,
+      };
+    }
+    return await super.runTurn(session, input);
+  }
+}
+
+Deno.test("two goal loops on different goals run concurrently under per-goal admission", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const port = 53533 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new ConcurrentLoopClient(onEvent),
+  });
+  try {
+    // Default capacity is 2: both kickoffs are admitted, and the second no
+    // longer gets the old project-wide "already running" 409.
+    const first = await fetch(`${server.url}/api/goals/loop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "First concurrent goal" }),
+    });
+    assertEquals(first.status, 201);
+    const a = await first.json();
+    const second = await fetch(`${server.url}/api/goals/loop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Second concurrent goal" }),
+    });
+    assertEquals(second.status, 201);
+    const b = await second.json();
+    assert(a.goalId !== b.goalId);
+
+    // A third kickoff while both hold slots hits the capacity 409.
+    const third = await fetch(`${server.url}/api/goals/loop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Third goal over capacity" }),
+    });
+    assertEquals(third.status, 409);
+    const denied = await third.json();
+    assertStringIncludes(denied.error, "Loop capacity reached");
+
+    // Both admitted goals plan, run, and close independently.
+    for (let index = 0; index < 200; index++) {
+      const board = await fetch(`${server.url}/api/board`).then((r) => r.json());
+      const goalA = board.goals.find((g: { id: string }) => g.id === a.goalId);
+      const goalB = board.goals.find((g: { id: string }) => g.id === b.goalId);
+      if (goalA?.status === "closed" && goalB?.status === "closed") {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Concurrent goal loops did not both close.");
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
