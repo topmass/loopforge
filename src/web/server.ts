@@ -25,6 +25,7 @@ import {
   runCommand,
 } from "../workers/git_utils.ts";
 import { GoalPlanner } from "../workers/goal_planner.ts";
+import { FrontRunner } from "../workers/front_runner.ts";
 import { GoalPursuer } from "../workers/goal_pursuer.ts";
 import { runScout } from "../workers/goal_scout.ts";
 import { GoalLoopRunner } from "../workers/goal_loop.ts";
@@ -288,8 +289,14 @@ export function startServer(
         onEvent: broadcastActivity,
         createCodexClient: options.createCodexClient,
       });
-      runner.run(goalId).then(() => {
+      runner.run(goalId).then((report) => {
         activeLoops.delete(goalId);
+        // Compact outcome receipt for the front transcript - no model turn.
+        const receipt = store.appendFrontMessage(
+          "front",
+          `[${goalId} ${report.outcome}] ${report.detail.slice(0, 240)}`,
+        );
+        broadcast("front", receipt);
         broadcastBoard();
       }).catch((error) => {
         activeLoops.delete(goalId);
@@ -298,6 +305,93 @@ export function startServer(
     });
     return true;
   };
+
+  // Kick off a brand-new goal loop from plain text: create the goal (visible
+  // instantly), hold its admission slot across planning, then launch the loop.
+  // Shared by the kickoff route and the front agent's DELEGATE_GOAL action.
+  const kickoffGoalLoop = (
+    text: string,
+    opts: {
+      hours?: number;
+      tokenBudget?: number;
+      maxIterations?: number;
+      questionMode?: boolean;
+    } = {},
+  ): { goalId: string } | { error: string } => {
+    if (activeLoops.size >= loopCapacity()) {
+      return {
+        error:
+          `Loop capacity reached (${activeLoops.size} running); wait for one to finish or raise agent.max_concurrent_agents in WORKFLOW.md.`,
+      };
+    }
+    const goal = store.createBareGoal(text);
+    activeLoops.set(goal.id, { startedAt: Date.now(), phase: "planning" });
+    broadcastActivity(store.appendLifecycleEvent({
+      kind: "goal.planning",
+      goalId: goal.id,
+      taskId: null,
+      summary: "Planning the goal into tasks and win conditions...",
+      data: {},
+    }));
+    queueMicrotask(async () => {
+      const planner = new GoalPlanner(normalizedRoot, {
+        projectMemory: buildProjectMemory(store),
+        createCodexClient: options.createCodexClient,
+        onEvent: (event) => {
+          const activity = store.appendAgentEvent(event);
+          broadcastActivity(activity);
+        },
+      });
+      try {
+        const plan = await planner.planGoal(text);
+        store.attachPlanToGoal(goal.id, plan.tasks, {
+          completionContract: plan.completionContract,
+          probes: plan.probes,
+        });
+        broadcastBoard();
+        launchGoalLoop(goal.id, opts, true);
+      } catch (error) {
+        activeLoops.delete(goal.id);
+        const message = error instanceof Error ? error.message : String(error);
+        broadcastActivity(store.appendLifecycleEvent({
+          kind: "goal.blocked",
+          goalId: goal.id,
+          taskId: null,
+          summary: `Planning failed: ${message}`,
+          data: { error: message },
+        }));
+      }
+    });
+    return { goalId: goal.id };
+  };
+
+  // Queue a steer for a goal (resuming a dormant loop) - shared by the /task
+  // route and the front agent's STEER_GOAL action.
+  const steerGoal = (goalId: string, text: string): boolean => {
+    store.enqueueGoalMessage(goalId, "user", text);
+    broadcastActivity(store.appendLifecycleEvent({
+      kind: "task.added",
+      goalId,
+      taskId: null,
+      summary: text,
+      data: { text },
+    }));
+    launchGoalLoop(goalId);
+    broadcastBoard();
+    return true;
+  };
+
+  // The front agent: constrained chief-of-staff turns over the front thread.
+  const frontRunner = new FrontRunner(normalizedRoot, store, {
+    onEvent: (event) => broadcastActivity(store.appendAgentEvent(event)),
+    createCodexClient: options.createCodexClient,
+    listActiveLoops: () => [...activeLoops.keys()],
+    delegateGoal: (text) => {
+      const result = kickoffGoalLoop(text);
+      return "goalId" in result ? result.goalId : null;
+    },
+    steerGoal: (goalId, text) => steerGoal(goalId, text),
+  });
 
   const abort = new AbortController();
   const server = Deno.serve(
@@ -568,6 +662,20 @@ export function startServer(
             return json({ error: "text is required." }, 400);
           }
           const message = store.appendFrontMessage("user", text);
+          broadcast("front", message);
+          queueMicrotask(() => {
+            frontRunner.handle(text).then((reply) => {
+              broadcast("front", reply);
+              broadcastBoard();
+            }).catch((error) => {
+              const detail = error instanceof Error ? error.message : String(error);
+              const failed = store.appendFrontMessage(
+                "front",
+                `[front turn failed: ${detail.slice(0, 200)}]`,
+              );
+              broadcast("front", failed);
+            });
+          });
           return json({ message, revision: store.eventRevision() }, 201);
         }
 
@@ -1335,48 +1443,11 @@ export function startServer(
               : undefined,
             questionMode: body.questionMode === true,
           };
-          // Create the goal first so the board shows it instantly, then plan and
-          // start the loop after responding - the planning turn no longer blocks
-          // the request.
-          const goal = store.createBareGoal(text);
-          activeLoops.set(goal.id, { startedAt: Date.now(), phase: "planning" });
-          broadcastActivity(store.appendLifecycleEvent({
-            kind: "goal.planning",
-            goalId: goal.id,
-            taskId: null,
-            summary: "Planning the goal into tasks and win conditions...",
-            data: {},
-          }));
-          queueMicrotask(async () => {
-            const planner = new GoalPlanner(normalizedRoot, {
-              projectMemory: buildProjectMemory(store),
-              createCodexClient: options.createCodexClient,
-              onEvent: (event) => {
-                const activity = store.appendAgentEvent(event);
-                broadcastActivity(activity);
-              },
-            });
-            try {
-              const plan = await planner.planGoal(text);
-              store.attachPlanToGoal(goal.id, plan.tasks, {
-                completionContract: plan.completionContract,
-                probes: plan.probes,
-              });
-              broadcastBoard();
-              launchGoalLoop(goal.id, opts, true);
-            } catch (error) {
-              activeLoops.delete(goal.id);
-              const message = error instanceof Error ? error.message : String(error);
-              broadcastActivity(store.appendLifecycleEvent({
-                kind: "goal.blocked",
-                goalId: goal.id,
-                taskId: null,
-                summary: `Planning failed: ${message}`,
-                data: { error: message },
-              }));
-            }
-          });
-          return json({ ok: true, goalId: goal.id, planning: true }, 201);
+          const kicked = kickoffGoalLoop(text, opts);
+          if ("error" in kicked) {
+            return json({ error: kicked.error }, 409);
+          }
+          return json({ ok: true, goalId: kicked.goalId, planning: true }, 201);
         }
 
         // Add a task to a goal = steer it. The loop owner folds the task into
@@ -1391,20 +1462,11 @@ export function startServer(
           if (!text) {
             return json({ error: "Task text is required." }, 400);
           }
-          store.enqueueGoalMessage(goalId, "user", text);
-          broadcastActivity(store.appendLifecycleEvent({
-            kind: "task.added",
-            goalId,
-            taskId: null,
-            summary: text,
-            data: { text },
-          }));
           // If no loop is running (e.g. it stopped after asking questions, or a
           // prior run ended), adding a task resumes the loop so the answer/steer
           // is acted on. A live loop just picks it up on its next turn.
-          const resumed = launchGoalLoop(goalId);
-          broadcastBoard();
-          return json({ ok: true, goalId, resumed });
+          steerGoal(goalId, text);
+          return json({ ok: true, goalId, resumed: activeLoops.has(goalId) });
         }
 
         // Edit a goal's objective; the loop injects an objective-updated steer.

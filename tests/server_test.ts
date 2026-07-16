@@ -1929,3 +1929,96 @@ Deno.test("approve-merge maps to the held task's restart-to-merge path", async (
     await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
+
+// Front-agent client: control-plane turns only. Delegates when asked, answers
+// plainly otherwise, and asserts every turn is grounded in the fresh ledger.
+class FrontAgentClient extends ConcurrentLoopClient {
+  override async runTurn(session: CodexSession, input: CodexTurnInput): Promise<CodexTurnResult> {
+    if (input.title === "LoopForge front turn") {
+      assertStringIncludes(input.prompt, "PROJECT LEDGER");
+      assertStringIncludes(input.prompt, "revision:");
+      const wantsDelegation = input.prompt.includes("delegate building the widget");
+      this.onEvent({
+        taskId: null,
+        runId: null,
+        role: "codex",
+        kind: "agent",
+        message: wantsDelegation
+          ? 'On it - starting a background loop.\nDELEGATE_GOAL: {"text":"Build the widget and prove it with a probe"}'
+          : "All quiet: the ledger shows the current state above.",
+      });
+      return {
+        threadId: session.threadId,
+        turnId: "turn-front",
+        status: "completed",
+        completed: true,
+      };
+    }
+    return await super.runTurn(session, input);
+  }
+}
+
+Deno.test("front agent answers from the ledger, delegates a loop, and receives its receipt", async () => {
+  const root = Deno.makeTempDirSync();
+  await git(root, ["init", "-b", "main"]);
+  await git(root, ["commit", "--allow-empty", "-m", "seed"]);
+  const port = 54133 + Math.floor(Math.random() * 300);
+  const server = startServer(root, port, {
+    createCodexClient: (onEvent) => new FrontAgentClient(onEvent),
+  });
+  const postFront = (text: string) =>
+    fetch(`${server.url}/api/front/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+  const listFront = () => fetch(`${server.url}/api/front/messages`).then((r) => r.json());
+  try {
+    // A plain question gets a plain, ledger-grounded answer.
+    const asked = await postFront("what is the current status?");
+    assertEquals(asked.status, 201);
+    let messages: { role: string; message: string }[] = [];
+    for (let index = 0; index < 100; index++) {
+      messages = (await listFront()).messages;
+      if (messages.some((m) => m.role === "front")) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert(messages.some((m) => m.role === "front" && m.message.includes("All quiet")));
+
+    // A delegation request spawns a real background loop...
+    await postFront("please delegate building the widget");
+    let delegated = "";
+    for (let index = 0; index < 100; index++) {
+      messages = (await listFront()).messages;
+      const reply = messages.find((m) =>
+        m.role === "front" && m.message.includes("[delegated to ")
+      );
+      if (reply) {
+        delegated = reply.message.match(/\[delegated to (GOAL-\d+)/)![1];
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert(delegated, "front agent never delegated");
+
+    // ...which plans, runs, closes, and drops a receipt into the transcript.
+    let receipt = false;
+    for (let index = 0; index < 200; index++) {
+      messages = (await listFront()).messages;
+      receipt = messages.some((m) => m.role === "front" && m.message.startsWith(`[${delegated} `));
+      if (receipt) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert(receipt, "no loop receipt landed in the front transcript");
+
+    // The front thread identity exists and is separate from the main thread.
+    const status = await fetch(`${server.url}/api/front/status`).then((r) => r.json());
+    assert(typeof status.frontThreadId === "string" && status.frontThreadId.length > 0);
+    const board = await fetch(`${server.url}/api/board`).then((r) => r.json());
+    assert(status.frontThreadId !== board.projectState.mainThreadId);
+  } finally {
+    server.shutdown();
+    await server.finished.catch(() => {});
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+  }
+});
