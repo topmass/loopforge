@@ -10,8 +10,8 @@ Last checked: 2026-07-06.
 - Local repo path is still `/home/topmass/Code/goalforge`.
 - Git remote is `https://github.com/topmass/loopforge.git`.
 - `./loopforge` is the primary launcher. `./goalforge` remains a compatibility alias.
-- Git HEAD and `origin/main` are synced at `0b6943a`.
-- `deno task test` passed on 2026-07-06 with 263 tests.
+- Git HEAD and `origin/main` are synced (thread-first migration steps 1-10 landed 2026-07-06).
+- `deno task test` passed on 2026-07-06 with 292 tests.
 - The React GUI under `app/` is the only interface, served at `/app/` by the server. Bare
   `loopforge` serves it and opens the browser. The legacy server-rendered `static/` GUI and the
   entire terminal command center (`src/tui/`, OpenTUI, Bun dependency, smoke harness) were
