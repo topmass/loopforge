@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { BoardStore } from "../src/board/store.ts";
 
 Deno.test("CLI close-goal closes the active proven goal", async () => {
@@ -397,5 +397,53 @@ Deno.test("CLI -C targets another project directory", async () => {
     Deno.removeSync(project, { recursive: true });
     Deno.removeSync(elsewhere, { recursive: true });
     Deno.removeSync(home, { recursive: true });
+  }
+});
+
+Deno.test("serving from the home directory redirects to a ~/LoopForge workspace", async () => {
+  const home = Deno.makeTempDirSync({ prefix: "loopforge-home-" });
+  const port = 54633 + Math.floor(Math.random() * 300);
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-read",
+      "--allow-write",
+      "--allow-env",
+      "--allow-run",
+      "--allow-net",
+      new URL("../src/cli.ts", import.meta.url).pathname,
+      "serve",
+      "--port",
+      String(port),
+    ],
+    cwd: home,
+    env: { HOME: home },
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  try {
+    let project: { path?: string } = {};
+    for (let index = 0; index < 100; index++) {
+      try {
+        const runtime = await fetch(`http://127.0.0.1:${port}/api/runtime`)
+          .then((r) => r.json());
+        project = runtime.project;
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    // The served project is the dedicated workspace, not the home folder.
+    assertEquals(project.path, `${home}/LoopForge`);
+    // The workspace was scaffolded; the home folder itself was left alone.
+    assert(await Deno.stat(`${home}/LoopForge/.loopforge`).then(() => true).catch(() => false));
+    assert(!(await Deno.stat(`${home}/WORKFLOW.md`).then(() => true).catch(() => false)));
+    assert(!(await Deno.stat(`${home}/AGENTS.md`).then(() => true).catch(() => false)));
+  } finally {
+    child.kill("SIGTERM");
+    await child.status;
+    await child.stdout.cancel();
+    await child.stderr.cancel();
+    await Deno.remove(home, { recursive: true }).catch(() => {});
   }
 });

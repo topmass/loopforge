@@ -37,6 +37,25 @@ import {
 
 const dirFlag = applyDirFlag(Deno.args);
 const root = normalizeRoot(dirFlag.root);
+
+// A GUI/serve launch whose working directory is the HOME folder itself (a
+// desktop/AppImage launch, or a stray `loopforge` in ~) must not adopt $HOME
+// as a project - scaffolding WORKFLOW.md, AGENTS.md, and .loopforge/ into a
+// home directory is clutter nobody asked for. Redirect to a dedicated
+// ~/LoopForge workspace (created on demand); an explicit -C always wins, and
+// real projects are added from the GUI sidebar as usual.
+function workspaceRootForServing(): string {
+  const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "";
+  if (dirFlag.explicit || !home || root !== normalizeRoot(home)) {
+    return root;
+  }
+  const workspace = path.join(home, "LoopForge");
+  Deno.mkdirSync(workspace, { recursive: true });
+  console.log(
+    `Launched from your home folder; using ${workspace} as the workspace. Add your real projects from the sidebar.`,
+  );
+  return workspace;
+}
 const [command, ...args] = normalizeArgs(applyBackendFlags(dirFlag.args));
 
 try {
@@ -322,8 +341,9 @@ function findFreePort(start: number): number {
 // One-command launcher for the web GUI: start the server and open the browser
 // at /app. The Tauri desktop wrapper (app/src-tauri) is the native upgrade.
 async function guiCommand(args: string[]): Promise<void> {
+  const serveRoot = workspaceRootForServing();
   // Print immediately so the launcher never looks frozen while the server boots.
-  console.log(`Starting LoopForge GUI for ${root} ...`);
+  console.log(`Starting LoopForge GUI for ${serveRoot} ...`);
   const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
   const requested = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
   if (!Number.isInteger(requested) || requested < 1) {
@@ -338,13 +358,13 @@ async function guiCommand(args: string[]): Promise<void> {
   // Opening the dashboard must be instant - it does NOT touch git. The git
   // baseline (which can be slow on first adoption) happens lazily when a goal
   // actually starts, inside the goal loop.
-  const store = new BoardStore(root);
+  const store = new BoardStore(serveRoot);
   try {
     store.initProject();
   } finally {
     store.close();
   }
-  const server = startServer(root, port);
+  const server = startServer(serveRoot, port);
   const appUrl = `${server.url}/app/`;
   console.log(`LoopForge GUI ready: ${appUrl}`);
   console.log("Leave this running; press Ctrl+C to stop the server.");
@@ -376,19 +396,20 @@ async function guiCommand(args: string[]): Promise<void> {
 }
 
 async function serveCommand(args: string[]): Promise<void> {
+  const serveRoot = workspaceRootForServing();
   const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
   const port = portArgIndex >= 0 ? Number(args[portArgIndex + 1]) : 4733;
   if (!Number.isInteger(port) || port < 1) {
     throw new Error("A valid --port value is required.");
   }
-  const store = new BoardStore(root);
+  const store = new BoardStore(serveRoot);
   try {
     store.initProject();
-    await ensureGitRepository(root);
+    await ensureGitRepository(serveRoot);
   } finally {
     store.close();
   }
-  const server = startServer(root, port);
+  const server = startServer(serveRoot, port);
   console.log(`Open ${server.url}`);
   await server.finished;
 }
@@ -785,7 +806,9 @@ function standupCommand(): void {
   });
 }
 
-function applyDirFlag(rawArgs: string[]): { root: string; args: string[] } {
+function applyDirFlag(
+  rawArgs: string[],
+): { root: string; args: string[]; explicit: boolean } {
   const remaining: string[] = [];
   let dir: string | null = null;
   for (let index = 0; index < rawArgs.length; index++) {
@@ -804,7 +827,7 @@ function applyDirFlag(rawArgs: string[]): { root: string; args: string[] } {
       Deno.exit(1);
     }
   }
-  return { root: Deno.cwd(), args: remaining };
+  return { root: Deno.cwd(), args: remaining, explicit: dir !== null };
 }
 
 function applyBackendFlags(rawArgs: string[]): string[] {
