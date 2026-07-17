@@ -45,7 +45,7 @@ Name=LoopForge
 Comment=Local Kanban for coding agents - loops that prove they are done
 Exec=loopforge
 Icon=loopforge
-Terminal=true
+Terminal=false
 Categories=Development;
 DESK
 

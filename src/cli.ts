@@ -367,19 +367,54 @@ async function guiCommand(args: string[]): Promise<void> {
   const server = startServer(serveRoot, port);
   const appUrl = `${server.url}/app/`;
   console.log(`LoopForge GUI ready: ${appUrl}`);
-  console.log("Leave this running; press Ctrl+C to stop the server.");
   if (!args.includes("--no-open")) {
-    const opener = Deno.build.os === "darwin"
-      ? "open"
-      : Deno.build.os === "windows"
-      ? "explorer"
-      : "xdg-open";
-    try {
-      // Spawn detached and do NOT await: some desktops' openers block until the
-      // browser closes, which would otherwise hang the launcher.
-      new Deno.Command(opener, { args: [appUrl], stdout: "null", stderr: "null" }).spawn();
-    } catch {
-      console.log("Open the URL above in your browser.");
+    // Standalone app window by default: a chromium-family browser in --app
+    // mode on a dedicated profile runs as our own child process, so closing
+    // the window IS closing LoopForge - the server shuts down with it. The
+    // dedicated profile matters: without it the spawn hands off to an
+    // existing browser process and exits immediately, breaking the lifecycle
+    // tie. --tab restores the old open-a-browser-tab behavior.
+    const appBrowser = args.includes("--tab") ? null : findAppBrowser();
+    if (appBrowser) {
+      const profile = path.join(
+        Deno.env.get("HOME") ?? ".",
+        ".loopforge",
+        "webview-profile",
+      );
+      Deno.mkdirSync(profile, { recursive: true });
+      try {
+        const windowChild = new Deno.Command(appBrowser, {
+          args: [
+            `--app=${appUrl}`,
+            `--user-data-dir=${profile}`,
+            "--no-first-run",
+            "--no-default-browser-check",
+          ],
+          stdout: "null",
+          stderr: "null",
+        }).spawn();
+        console.log("Close the LoopForge window to stop the server (Ctrl+C also works).");
+        windowChild.status.then(() => {
+          console.log("App window closed; stopping LoopForge.");
+          server.shutdown();
+        });
+      } catch {
+        console.log("Could not open an app window; open the URL above in your browser.");
+      }
+    } else {
+      console.log("Leave this running; press Ctrl+C to stop the server.");
+      const opener = Deno.build.os === "darwin"
+        ? "open"
+        : Deno.build.os === "windows"
+        ? "explorer"
+        : "xdg-open";
+      try {
+        // Spawn detached and do NOT await: some desktops' openers block until
+        // the browser closes, which would otherwise hang the launcher.
+        new Deno.Command(opener, { args: [appUrl], stdout: "null", stderr: "null" }).spawn();
+      } catch {
+        console.log("Open the URL above in your browser.");
+      }
     }
   }
   // Clean shutdown on Ctrl+C so the port releases promptly for the next run.
@@ -393,6 +428,15 @@ async function guiCommand(args: string[]): Promise<void> {
     // Signal listeners are unavailable on some platforms; Ctrl+C still exits.
   }
   await server.finished;
+  // The registered signal listener holds the event loop open, so the process
+  // would linger after the window closed and the server finished. Remove it
+  // and exit deliberately - this command IS the app's lifetime.
+  try {
+    Deno.removeSignalListener("SIGINT", stop);
+  } catch {
+    // never registered
+  }
+  Deno.exit(0);
 }
 
 async function serveCommand(args: string[]): Promise<void> {
@@ -957,6 +1001,27 @@ function normalizeArgs(args: string[]): [string | undefined, ...string[]] {
     return ["gui", ...args];
   }
   return [first, ...args.slice(1)];
+}
+
+// A chromium-family browser that supports --app windows, for the standalone
+// app experience. Order prefers the user's likeliest daily driver.
+function findAppBrowser(): string | null {
+  for (
+    const name of [
+      "google-chrome",
+      "google-chrome-stable",
+      "chromium",
+      "chromium-browser",
+      "brave-browser",
+      "microsoft-edge",
+    ]
+  ) {
+    const found = resolveExecutable(name, []);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 }
 
 function resolveExecutable(name: string, fallbacks: string[]): string | null {
@@ -1556,7 +1621,9 @@ Usage:
   loopforge review TASK-ID
   loopforge delete TASK-ID
   loopforge message TASK-ID "<message>"
-  loopforge gui [--port 4733] [--no-open]   # serve + open the browser (the default)
+  loopforge gui [--port 4733] [--no-open] [--tab]   # standalone app window (the default);
+                                            # closing the window stops the server; --tab
+                                            # opens a browser tab instead
   loopforge serve [--port 4733]             # serve only, no browser
   loopforge merge TASK-ID
   loopforge main status|ensure|reset|absorb
