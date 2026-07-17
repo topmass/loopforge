@@ -121,6 +121,15 @@ LoopForge can also run as a server/API with the React GUI:
   win-conditions strip toggles `ProbePanel` (list, edit, add, delete, re-run). `POST
   /api/goals/:id/check` runs probes in the goal's loop worktree when one exists (root otherwise)
   and 409s while a loop is running (the loop re-checks every turn itself).
+- Probe robustness (validated on live local-27B fleet tests 2026-07-16, three independent
+  failure hits): the planner prompt enforces quoting discipline (fixed-string `grep -qiF`, no
+  regex escapes, no embedded `python -c`); `addProbes` drops and `updateProbe` rejects commands
+  that fail `bash -n` (nested-quote garbage can never run); and the goal loop detects probes
+  whose OUTPUT is a tool/syntax error (`probeLooksBroken`) - after one warning it finishes
+  BLOCKED with a "repair in the win conditions panel" ask instead of burning its whole
+  iteration budget re-verifying correct work. `pi_rpc_client` waiter/request promises register
+  no-op rejection handlers so a turn that dies before its awaiter can never take down the whole
+  server via an unobserved rejection (this crashed a live server once).
 - Probe safety (found by adversarial testing 2026-07-06): probes run under `setsid` and timeouts
   kill the whole process group, or orphaned background servers (http.server probes) squat on
   ports and poison later runs; `runGoalProbes` discards results for probes edited mid-run

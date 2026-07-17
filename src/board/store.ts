@@ -892,6 +892,20 @@ export class BoardStore {
       if (!draft.label.trim() || !draft.command.trim()) {
         continue;
       }
+      // Planner-authored probes with shell syntax errors (nested-quote
+      // escaping is the classic) can never pass and doom the loop to fail a
+      // correct implementation forever - two independent live runs hit this.
+      // A probe that bash cannot even parse is dropped at the door.
+      if (probeCommandSyntaxError(draft.command) !== null) {
+        this.appendEvent(
+          null,
+          null,
+          "core",
+          "probes",
+          `${goalId}: dropped probe "${draft.label.trim().slice(0, 80)}" - shell syntax error.`,
+        );
+        continue;
+      }
       this.db.prepare(
         "INSERT INTO goal_probes (goal_id, label, command, expect_contains, timeout_ms) VALUES (?, ?, ?, ?, ?)",
       ).run(
@@ -941,6 +955,11 @@ export class BoardStore {
     const expect = patch.expectContains !== undefined
       ? (patch.expectContains?.trim() || null)
       : existing.expectContains;
+    // Human edits get the error surfaced instead of a silent drop.
+    const syntaxError = command !== existing.command ? probeCommandSyntaxError(command) : null;
+    if (syntaxError !== null) {
+      throw new Error(`Probe command has a shell syntax error: ${syntaxError}`);
+    }
     const checkChanged = command !== existing.command || expect !== existing.expectContains;
     if (checkChanged) {
       this.db.prepare(
@@ -2867,6 +2886,26 @@ function scheduleFromRow(row: SqlRow): Schedule {
     lastRunAt: nullableString(row.last_run_at),
     createdAt: String(row.created_at),
   };
+}
+
+// bash -n parses without executing: a command it rejects can never run, let
+// alone pass. Sync is fine - probe writes are rare, and the pattern matches
+// hasSetsid() in goal_probes.
+function probeCommandSyntaxError(command: string): string | null {
+  try {
+    const result = new Deno.Command("bash", {
+      args: ["-nc", command],
+      stdout: "null",
+      stderr: "piped",
+    }).outputSync();
+    if (result.success) {
+      return null;
+    }
+    return new TextDecoder().decode(result.stderr).trim().slice(0, 200) || "bash -n rejected it";
+  } catch {
+    // No bash available (never on supported hosts): do not block writes.
+    return null;
+  }
 }
 
 function frontMessageFromRow(row: SqlRow): FrontMessage {

@@ -180,7 +180,11 @@ export class FrontRunner {
         return {
           reply: stripped,
           action: goalId
-            ? `[delegated to ${goalId}: ${goalText.slice(0, 120)}]`
+            ? `[delegated to ${goalId}: ${
+              goalText.length > 120
+                ? `${goalText.slice(0, 117).replace(/\s+\S*$/, "")}...`
+                : goalText
+            }]`
             : "[delegation refused: loop capacity reached - try again when a loop finishes]",
         };
       } catch {
@@ -274,8 +278,11 @@ ${text}
 Reply concisely. Then, if and only if an action is needed, end with EXACTLY ONE of:
 - ${DELEGATE_TOKEN} {"text":"<self-contained goal text for a background loop>"} on its own line, to start new implementation work.
 - ${STEER_TOKEN} GOAL-N <one line of guidance> to steer that goal's loop.
-Rules: never fabricate goal ids - only steer goals present in the ledger. Decisions that belong to
-the user (held merges, blocked asks) are surfaced in plain words, never acted on. A question that
-the ledger answers needs no action token at all.`;
+Rules: never fabricate goal ids - only steer goals present in the ledger, and ONLY the goal the
+user actually named. If the user names a goal that does not exist, say so and STOP: never redirect
+the action to a different goal in the same turn - offer the alternative in words and wait for the
+user to ask. Offering something as a question and executing it in the same reply is forbidden.
+Decisions that belong to the user (held merges, blocked asks) are surfaced in plain words, never
+acted on. A question that the ledger answers needs no action token at all.`;
   }
 }

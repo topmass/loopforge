@@ -952,3 +952,32 @@ Deno.test("updateProbe edits reset the result only when the check itself changes
     Deno.removeSync(root, { recursive: true });
   }
 });
+
+Deno.test("probes with shell syntax errors are dropped at creation and rejected on edit", () => {
+  const root = Deno.makeTempDirSync();
+  const store = new BoardStore(root);
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Syntax guard");
+    // The exact nested-quote shape two live local-model runs produced: bash
+    // cannot even parse it ("unexpected EOF while looking for matching quote").
+    const broken = "curl -fsS http://127.0.0.1:4181/ | grep -Eiq '[\"'\"']stylesheet[\"'\"']";
+    const probes = store.addProbes(goal.id, [
+      { label: "doomed nested quotes", command: broken + "'" },
+      { label: "valid check", command: "test -f index.html" },
+    ]);
+    assertEquals(probes.length, 1);
+    assertEquals(probes[0].label, "valid check");
+
+    assertThrows(
+      () => store.updateProbe(probes[0].id, { command: "grep -q 'unterminated" }),
+      Error,
+      "shell syntax error",
+    );
+    // The failed edit left the original intact.
+    assertEquals(store.getProbe(probes[0].id)!.command, "test -f index.html");
+  } finally {
+    store.close();
+    Deno.removeSync(root, { recursive: true });
+  }
+});

@@ -25,7 +25,7 @@ import {
   removeTaskWorktree,
   runCommand,
 } from "./git_utils.ts";
-import { probeLights, runGoalProbes } from "./goal_probes.ts";
+import { probeLights, probeLooksBroken, runGoalProbes } from "./goal_probes.ts";
 import {
   FanoutRunner,
   findScopeConflict,
@@ -203,6 +203,7 @@ export class GoalLoopRunner {
       let stalls = 0;
       let fanoutNudged = false;
       let greenStreak = 0;
+      let brokenProbeWarned = false;
       let probeFeedback = "";
       let lastObjective = goal.text;
       for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -428,6 +429,39 @@ export class GoalLoopRunner {
             );
           }
           const failing = summary.results.filter((result) => !result.passed);
+          // When every remaining red probe is broken check plumbing (syntax
+          // errors in the probe command itself), more iterations cannot help:
+          // the agent cannot edit probes. Warn once so a coincidental match
+          // gets a second look, then stop with the exact repair ask instead
+          // of burning the whole budget re-verifying correct work.
+          if (failing.length && failing.every((result) => probeLooksBroken(result.output))) {
+            if (brokenProbeWarned) {
+              const labels = failing.map((result) => result.probe.label).join("; ");
+              return this.finish(
+                goalId,
+                iteration,
+                "blocked",
+                `The remaining win-condition probe(s) appear BROKEN (the check command itself ` +
+                  `errors, regardless of the work): ${labels}. Repair them in the win ` +
+                  `conditions panel, then send any message to resume this loop.`,
+              );
+            }
+            brokenProbeWarned = true;
+            probeFeedback = [
+              `Win conditions are not green yet (${summary.passed}/${summary.total}), but the ` +
+              `failing probe(s) look BROKEN - their commands error before checking anything:`,
+              ...failing.map((result) => `- ${result.probe.label}: ${result.output.slice(0, 200)}`),
+              "You cannot edit probes. If the work itself is genuinely complete, declare " +
+              "completion again and LoopForge will stop with a probe-repair ask for the user " +
+              "instead of looping.",
+            ].join("\n");
+            this.emitEvent(
+              goalId,
+              "probes",
+              `Failing probes look broken (check-command errors); warned the loop once.`,
+            );
+            continue;
+          }
           probeFeedback = [
             `Win conditions are not green yet (${summary.passed}/${summary.total} ${
               probeLights(this.store.listProbes(goalId))

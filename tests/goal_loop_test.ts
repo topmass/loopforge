@@ -411,6 +411,50 @@ Deno.test("a probe repaired mid-loop is picked up by the shell check and closes 
   }
 });
 
+Deno.test("a loop with only broken probes blocks with a repair ask instead of burning budget", async () => {
+  const root = Deno.makeTempDirSync();
+  await seedRepo(root);
+  const store = new BoardStore(root);
+  let client: ScriptedLoopClient | null = null;
+  try {
+    store.initProject();
+    const { goal } = store.createGoal("Doomed by a self-authored probe");
+    // The live failure shape: bash parses this fine, python dies instantly
+    // with a SyntaxError - the probe can never pass regardless of the work.
+    store.addProbes(goal.id, [{
+      label: "served page parses",
+      command: 'python3 -c "import sys;\\nclass P: pass"',
+    }]);
+    const runner = new GoalLoopRunner(root, store, {
+      runMode: "unattended",
+      maxIterations: 10,
+      onEvent: () => {},
+      createCodexClient: (onEvent) => {
+        client = new ScriptedLoopClient(onEvent, async (cwd, turn) => {
+          if (turn === 1) {
+            const item = store.addLoopPlanItem(goal.id, "Do the work");
+            store.setLoopPlanItemStatus(goal.id, item.id, "done", "wrote work.txt");
+            await Deno.writeTextFile(`${cwd}/work.txt`, "done\n");
+          }
+          return "Everything is genuinely finished.\nLOOP_COMPLETE";
+        });
+        return client;
+      },
+    });
+    const report = await runner.run(goal.id);
+    // Turn 1 claims -> broken probe detected, warned once. Turn 2 claims
+    // again -> blocked with the repair ask, at 2 turns instead of 10.
+    assertEquals(report.outcome, "blocked");
+    assertEquals(client!.turns, 2);
+    assertStringIncludes(report.detail, "appear BROKEN");
+    assertStringIncludes(report.detail, "win conditions panel");
+    assertStringIncludes(client!.prompts[1], "look BROKEN");
+  } finally {
+    store.close();
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("goal loop with worktrees disabled runs in the project root and closes without merging", async () => {
   const root = Deno.makeTempDirSync();
   await seedRepo(root);

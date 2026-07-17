@@ -121,6 +121,14 @@ async function runProbeCommand(
   }
 }
 
+// A probe whose OUTPUT is a tool/syntax error is broken check plumbing, not a
+// red condition: it can never pass no matter how good the work is. Three
+// independent live runs burned their whole iteration budget on exactly this.
+export function probeLooksBroken(output: string): boolean {
+  return /SyntaxError|unexpected EOF while looking|command not found|bad substitution|unexpected character after line continuation|probe failed to run/
+    .test(output);
+}
+
 export function probeLights(probes: GoalProbe[]): string {
   if (!probes.length) {
     return "";

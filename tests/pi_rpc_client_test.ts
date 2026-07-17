@@ -149,3 +149,23 @@ async function git(root: string, args: string[]): Promise<void> {
     throw new Error(new TextDecoder().decode(output.stderr));
   }
 }
+
+Deno.test("stop() after a failed turn never leaves an unobserved rejection", async () => {
+  const cwd = Deno.makeTempDirSync();
+  const client = new PiRpcClient(() => {}, { command: fakePiCommand() });
+  try {
+    const session = await client.startSession(cwd, { name: "LoopForge - test - crash" });
+    // Kill the child mid-flight so the next request path fails before the
+    // turn waiter is ever awaited, then stop() rejects the orphaned waiter.
+    // Before the fix this produced an uncaught rejection that killed the
+    // whole process (observed live: 'Pi RPC client stopped.' took the server
+    // down after a transient provider error). The test passing IS the
+    // assertion - an unobserved rejection would fail this test file.
+    await client.stop();
+    await client.runTurn(session, { title: "T: doomed", prompt: "hi" }).catch(() => {});
+    await client.stop();
+  } finally {
+    await client.stop().catch(() => {});
+    Deno.removeSync(cwd, { recursive: true });
+  }
+});

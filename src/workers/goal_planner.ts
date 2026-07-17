@@ -197,6 +197,12 @@ Rules:
 - Each command is a shell one-liner run from the repository root that exits 0 on success (it may
   start and stop a process it needs). Keep probes cheap and deterministic. Grep or file checks are
   acceptable only as secondary probes next to at least one outcome probe.
+- QUOTING DISCIPLINE: probe commands survive JSON encoding and then run under bash -c, so
+  escape sequences break silently. Use only simple tools with SINGLE-QUOTED fixed-string
+  patterns: curl, test -f, grep -qiF 'literal text'. NEVER use regex metacharacters that need
+  backslash escapes, never embed python -c / node -e snippets, never use \\b or \\. sequences -
+  a probe whose pattern cannot match dooms the loop to fail a correct implementation forever.
+  If a check seems to need a regex, split it into two fixed-string greps instead.
 - completionContract is a compact markdown checklist that defines what must be true before the overall goal can be closed.
 - tasks is a JSON array of 1 to 12 task objects.
 - Each task object must include title, prompt, acceptanceCriteria, priority, workpad, dependsOn, riskLevel, and verificationPlan.

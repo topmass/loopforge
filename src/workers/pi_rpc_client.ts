@@ -139,6 +139,12 @@ export class PiRpcClient implements CodexClient {
     const done = new Promise<void>((resolve, reject) => {
       this.turnWaiter = { resolve, reject };
     });
+    // If the prompt request below throws, nothing ever awaits `done`; a later
+    // stop() still rejects the waiter, and an unobserved rejection kills the
+    // whole Deno process (it did, mid-run, on a transient pi provider error).
+    // Registering one no-op handler marks it observed; `await done` on the
+    // happy path still receives the real rejection.
+    done.catch(() => {});
     await this.request("prompt", { message: input.prompt });
     await done;
     this.currentTurnId = null;
@@ -256,6 +262,10 @@ export class PiRpcClient implements CodexClient {
     const response = new Promise<JsonObject>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });
+    // Same unobserved-rejection guard as runTurn's waiter: if send() throws,
+    // this promise has no awaiter, and stop()/exit rejecting it must not kill
+    // the process.
+    response.catch(() => {});
     await this.send({ id, type, ...params });
     return await response;
   }
