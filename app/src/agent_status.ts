@@ -47,9 +47,7 @@ export function workerChips(
   const dispatcher = (agentStatuses ?? []).map((worker): WorkerChip => ({
     key: `task:${worker.taskId}`,
     label: worker.taskId,
-    detail: worker.headline
-      ? `${worker.phase} · ${worker.headline}`
-      : worker.phase,
+    detail: worker.headline ? `${worker.phase} · ${worker.headline}` : worker.phase,
     tone: riskTone(worker.risk),
     taskId: worker.taskId,
   }));

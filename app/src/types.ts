@@ -32,6 +32,17 @@ export interface LifecycleEvent {
   data: Record<string, unknown>;
 }
 
+// An armed schedule: recurring probe rechecks or scout passes.
+export interface Schedule {
+  id: number;
+  kind: "probe-recheck" | "scout";
+  goalId: string | null;
+  intervalMinutes: number;
+  enabled: boolean;
+  lastRunAt: string | null;
+  createdAt: string;
+}
+
 // One message in the front thread - the chief-of-staff conversation. Receipts
 // (loop outcomes, delegation confirmations) arrive as role "front" too.
 export interface FrontMessage {

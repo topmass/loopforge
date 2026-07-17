@@ -34,9 +34,7 @@ export function CenterTabs(
         className={`flex items-center gap-1.5 ${tabClass(tab === "thread")}`}
       >
         Thread
-        {live && (
-          <span className={`h-1.5 w-1.5 rounded-full ${STATUS.live.dot}`} />
-        )}
+        {live && <span className={`h-1.5 w-1.5 rounded-full ${STATUS.live.dot}`} />}
       </button>
     </div>
   );

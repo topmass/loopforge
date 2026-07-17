@@ -68,9 +68,7 @@ export function DiffPanel() {
       if (seeded.current !== id) {
         seeded.current = id;
         setExpanded(
-          next.files.length <= AUTO_EXPAND_MAX
-            ? new Set(next.files.map((f) => f.path))
-            : new Set(),
+          next.files.length <= AUTO_EXPAND_MAX ? new Set(next.files.map((f) => f.path)) : new Set(),
         );
       }
     } catch (e) {
@@ -232,9 +230,7 @@ function PatchBody({ patch }: { patch: string }) {
           </div>
         );
       })}
-      {extra > 0 && (
-        <div className="px-4 py-1 text-ink-faint">... {extra} more lines</div>
-      )}
+      {extra > 0 && <div className="px-4 py-1 text-ink-faint">... {extra} more lines</div>}
     </div>
   );
 }

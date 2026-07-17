@@ -21,9 +21,7 @@ export type Theme = "light" | "dark";
 // First paint theme: a stored choice wins; otherwise Night Ops (dark) is the
 // flagship default, unless the OS explicitly prefers light.
 function initialTheme(): Theme {
-  const stored = typeof localStorage !== "undefined"
-    ? localStorage.getItem("lf-theme")
-    : null;
+  const stored = typeof localStorage !== "undefined" ? localStorage.getItem("lf-theme") : null;
   if (stored === "light" || stored === "dark") return stored;
   const prefersLight = typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-color-scheme: light)").matches;
@@ -196,9 +194,7 @@ export const useStore = create<AppState>((set) => ({
               maxIterations: Number(lifecycle.data.maxIterations) || 0,
               tokensUsed: Number(lifecycle.data.tokensUsed) || 0,
               elapsedMs: Number(lifecycle.data.elapsedMs) || 0,
-              reason: typeof lifecycle.data.reason === "string"
-                ? lifecycle.data.reason
-                : "",
+              reason: typeof lifecycle.data.reason === "string" ? lifecycle.data.reason : "",
             },
           };
         }
@@ -216,8 +212,9 @@ export const useStore = create<AppState>((set) => ({
           const title = (lifecycle.data.title as string) ?? lifecycle.taskId ??
             lifecycle.summary;
           const existing = state.subagentsByGoal[lifecycle.goalId] ?? [];
-          const state2: "running" | "merged" =
-            lifecycle.kind === "subagent.merged" ? "merged" : "running";
+          const state2: "running" | "merged" = lifecycle.kind === "subagent.merged"
+            ? "merged"
+            : "running";
           const found = existing.find((s) => s.title === title);
           const updated = found
             ? existing.map((

@@ -13,6 +13,7 @@ import type {
   Probe,
   ProjectEntry,
   Runtime,
+  Schedule,
 } from "./types";
 import { useStore } from "./store";
 
@@ -80,8 +81,7 @@ export const api = {
   runtime: () => jsonFetch<Runtime>("/api/runtime"),
   // Projects: registry read/add and "open" (get the project server's URL,
   // spawning it if needed). All three hit the primary origin.
-  listProjects: () =>
-    primaryFetch<{ projects: ProjectEntry[] }>("/api/projects"),
+  listProjects: () => primaryFetch<{ projects: ProjectEntry[] }>("/api/projects"),
   addProject: (root: string) =>
     primaryFetch<{ projects: ProjectEntry[] }>("/api/projects", {
       method: "POST",
@@ -227,6 +227,21 @@ export const api = {
         body: JSON.stringify({ text }),
       },
     ),
+  // Armed schedules: probe rechecks and scout passes on a cadence. Never
+  // implementation work, never merge approvals.
+  listSchedules: () => jsonFetch<{ schedules: Schedule[] }>("/api/schedules"),
+  createSchedule: (kind: string, intervalMinutes: number) =>
+    jsonFetch<{ schedule: Schedule }>("/api/schedules", {
+      method: "POST",
+      body: JSON.stringify({ kind, intervalMinutes }),
+    }),
+  updateSchedule: (id: number, patch: { enabled?: boolean; intervalMinutes?: number }) =>
+    jsonFetch<{ schedule: Schedule }>(`/api/schedules/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteSchedule: (id: number) =>
+    jsonFetch<{ ok: boolean }>(`/api/schedules/${id}`, { method: "DELETE" }),
   // Explicit merge approval for an attended hold - maps to the held task's
   // restart-to-merge path server-side. Never inferred from chat.
   approveMerge: (goalId: string) =>
@@ -273,9 +288,7 @@ export const api = {
       {
         method: "PATCH",
         body: JSON.stringify({
-          ...(patch.provider !== undefined
-            ? { localPiProvider: patch.provider }
-            : {}),
+          ...(patch.provider !== undefined ? { localPiProvider: patch.provider } : {}),
           ...(patch.model !== undefined ? { localPiModel: patch.model } : {}),
         }),
       },

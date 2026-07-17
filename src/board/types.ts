@@ -173,6 +173,20 @@ export interface GoalProbeDraft {
   timeoutMs?: number;
 }
 
+// An armed schedule: a recurring, tightly-scoped action class the server
+// ticks (probe rechecks, scout passes). Never implementation, never approvals.
+export type ScheduleKind = "probe-recheck" | "scout";
+
+export interface Schedule {
+  id: number;
+  kind: ScheduleKind;
+  goalId: string | null;
+  intervalMinutes: number;
+  enabled: boolean;
+  lastRunAt: string | null;
+  createdAt: string;
+}
+
 // One message in the user-facing front thread (thread-first migration).
 // Distinct from `messages` (task steers) and `goal_messages` (loop steers):
 // this is the chief-of-staff conversation itself.

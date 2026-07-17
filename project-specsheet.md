@@ -430,10 +430,31 @@ Landed so far (steps 1-3, all additive):
   new code that merges to root, runs `git worktree add/prune/remove`, or publishes MUST go
   through `withRepoLock` - never call those git operations bare.
 
-Not yet built (later steps, in order): per-goal loop runners behind the coordinator (retiring the
-global `goalLoopRunning` boolean), resource-keyed probe scheduling, goal-level "Approve merge"
-action mapped to the held-task path, the constrained front runner, Thread-as-default GUI, idle
-compaction, hub scheduling.
+- Step 5: per-goal loop admission (`activeLoops` registry in server.ts) - same goal never
+  double-runs, total bounded by `agent.max_concurrent_agents`; probe execution serializes on a
+  `probes:<root>` lease (`withLease`); manual checks 409 only for the checked goal's own loop.
+- Step 6: `POST /api/goals/:id/approve-merge` maps to the held task's restart-to-merge path; the
+  GUI shows an Approve banner on a scoped loop with a hold; holds surface in /api/front/status.
+- Step 7: `FrontRunner` (src/workers/front_runner.ts) - one control-plane turn at a time on the
+  front thread, every turn grounded in a fresh ledger digest, closed action grammar
+  (answer / DELEGATE_GOAL {text} / STEER_GOAL GOAL-N). POST /api/front/messages triggers turns;
+  replies + loop outcome receipts stream over the `front` SSE event.
+- Step 8: thread-first GUI - Main agent pinned in the sidebar, `FrontThreadView` is the default
+  center (receipt chips link to their loop), composer defaults to the Main agent target,
+  Board/Thread tabs appear only for a selected loop / All loops.
+- Step 9: idle compaction - after a turn, past 12 messages / 24k chars of uncompacted tail the
+  runner regenerates `.loopforge/context/current-state.md` (deterministic resume capsule, a
+  rebuildable cache, never truth), advances `front_last_compact_id`, then calls the backend's
+  optional `compactThread`.
+- Step 10: armed schedules (`schedules` table + src/workers/schedules.ts + a 60s server ticker):
+  probe-recheck (skips goals with running loops; reports probe REGRESSIONS to the front
+  transcript) and scout passes only. last_run_at stamps BEFORE the action (no double-fire), and
+  schedules can never start implementation or approve holds. CRUD at /api/schedules; managed
+  from the settings modal.
+
+Deferred from the blueprint: the local GPU governor (Quiet/Balanced/Overnight profiles) waits
+until local-model testing is allowed again; machine-level cross-project admission waits until
+the CLI can join the server's broker.
 
 ## Model Routing
 

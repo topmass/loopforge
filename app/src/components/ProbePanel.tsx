@@ -37,9 +37,7 @@ function ProbeRow(
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
       >
         <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-            probeDot(probe.lastStatus)
-          }`}
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${probeDot(probe.lastStatus)}`}
         />
         <span className="min-w-0 flex-1 truncate text-ink">{probe.label}</span>
         <span className="shrink-0 text-[10px] uppercase tracking-wider text-ink-faint">
@@ -220,9 +218,7 @@ export function ProbePanel({ goalId, probes, loopLive }: {
             <button
               type="button"
               disabled={busy || loopLive || probes.length === 0}
-              title={loopLive
-                ? "The running loop re-checks these every turn."
-                : undefined}
+              title={loopLive ? "The running loop re-checks these every turn." : undefined}
               onClick={() => void wrap(() => api.checkGoal(goalId))}
               className="rounded-lg border border-line px-3 py-1 text-xs text-ink-muted transition hover:bg-surface-sunken disabled:opacity-40"
             >

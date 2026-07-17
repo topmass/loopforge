@@ -15,8 +15,7 @@ function isReceipt(message: FrontMessage): boolean {
 
 function ReceiptLine({ text }: { text: string }) {
   const setActiveGoal = useStore((s) => s.setActiveGoal);
-  const goalRef =
-    text.match(/\[(?:delegated to |steer queued for )?(GOAL-\d+)/)?.[1] ?? null;
+  const goalRef = text.match(/\[(?:delegated to |steer queued for )?(GOAL-\d+)/)?.[1] ?? null;
   return (
     <div className="flex justify-center px-4 py-1">
       <button
@@ -25,9 +24,7 @@ function ReceiptLine({ text }: { text: string }) {
         onClick={() => goalRef && setActiveGoal(goalRef)}
         title={goalRef ? `Open ${goalRef}` : undefined}
         className={`max-w-[80%] truncate rounded-full border border-line bg-surface-sunken px-3 py-1 font-mono text-[11px] text-ink-muted ${
-          goalRef
-            ? "transition hover:border-accent hover:text-ink"
-            : "cursor-default"
+          goalRef ? "transition hover:border-accent hover:text-ink" : "cursor-default"
         }`}
       >
         {text}
@@ -47,9 +44,7 @@ function Bubble({ message }: { message: FrontMessage }) {
     <>
       {prose.trim() && (
         <div
-          className={`flex px-4 py-1.5 ${
-            user ? "justify-end" : "justify-start"
-          }`}
+          className={`flex px-4 py-1.5 ${user ? "justify-end" : "justify-start"}`}
         >
           <div
             className={`max-w-[76%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -62,9 +57,7 @@ function Bubble({ message }: { message: FrontMessage }) {
           </div>
         </div>
       )}
-      {trailing.map((line, index) => (
-        <ReceiptLine key={index} text={line.trim()} />
-      ))}
+      {trailing.map((line, index) => <ReceiptLine key={index} text={line.trim()} />)}
     </>
   );
 }
@@ -85,9 +78,8 @@ export function FrontThreadView() {
           Talk to your project
         </div>
         <div className="max-w-md text-sm text-ink-muted">
-          The main agent answers from the live project ledger, delegates real
-          work to background loops, and reports back with proof. Loops and their
-          boards live in the sidebar.
+          The main agent answers from the live project ledger, delegates real work to background
+          loops, and reports back with proof. Loops and their boards live in the sidebar.
         </div>
       </div>
     );

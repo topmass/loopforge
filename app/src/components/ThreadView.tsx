@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useStore } from "../store";
 import { api } from "../api";
@@ -159,8 +153,7 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const near =
-      el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
     atBottomRef.current = near;
     setAtBottom(near);
   };
@@ -205,9 +198,7 @@ export function ThreadView({ goal }: { goal: Goal | null }) {
           onScroll={onScroll}
           className="flex-1 overflow-y-auto px-4 py-4"
         >
-          {error && (
-            <div className="mb-3 text-center text-xs text-danger">{error}</div>
-          )}
+          {error && <div className="mb-3 text-center text-xs text-danger">{error}</div>}
           {loading && !thread && (
             <div className="py-10 text-center text-sm text-ink-faint">
               Loading thread...
@@ -318,9 +309,7 @@ function EntryRow(
 
     case "agent": {
       const long = entry.text.length > AGENT_COLLAPSE;
-      const shown = long && !open
-        ? entry.text.slice(0, AGENT_COLLAPSE)
-        : entry.text;
+      const shown = long && !open ? entry.text.slice(0, AGENT_COLLAPSE) : entry.text;
       return (
         // A filled accent dot marks the owning agent's prose.
         <div className="flex justify-start gap-2">

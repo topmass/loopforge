@@ -46,6 +46,7 @@ import {
   ProjectState,
   QueuedMessage,
   Run,
+  Schedule,
   Task,
   TASK_STATUS_LABELS,
   TASK_STATUSES,
@@ -407,6 +408,56 @@ export class BoardStore {
         "SELECT * FROM (SELECT * FROM front_messages ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
       ).all(limit);
     return (rows as SqlRow[]).map(frontMessageFromRow);
+  }
+
+  // ---- Armed schedules -------------------------------------------------------
+
+  listSchedules(): Schedule[] {
+    const rows = this.db.prepare("SELECT * FROM schedules ORDER BY id ASC").all();
+    return (rows as SqlRow[]).map(scheduleFromRow);
+  }
+
+  createSchedule(
+    kind: "probe-recheck" | "scout",
+    intervalMinutes: number,
+    goalId?: string,
+  ): Schedule {
+    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 15) {
+      throw new Error("intervalMinutes must be an integer of at least 15.");
+    }
+    if (goalId) {
+      this.getGoal(goalId);
+    }
+    const row = this.db.prepare(
+      "INSERT INTO schedules (kind, goal_id, interval_minutes, enabled, created_at) VALUES (?, ?, ?, 1, ?) RETURNING *",
+    ).get(kind, goalId ?? null, intervalMinutes, timestamp()) as SqlRow;
+    return scheduleFromRow(row);
+  }
+
+  updateSchedule(
+    id: number,
+    patch: { enabled?: boolean; intervalMinutes?: number },
+  ): Schedule {
+    const existing = this.listSchedules().find((schedule) => schedule.id === id);
+    if (!existing) {
+      throw new Error(`Schedule ${id} not found.`);
+    }
+    const interval = patch.intervalMinutes ?? existing.intervalMinutes;
+    if (!Number.isInteger(interval) || interval < 15) {
+      throw new Error("intervalMinutes must be an integer of at least 15.");
+    }
+    const enabled = patch.enabled ?? existing.enabled;
+    this.db.prepare("UPDATE schedules SET enabled = ?, interval_minutes = ? WHERE id = ?")
+      .run(enabled ? 1 : 0, interval, id);
+    return this.listSchedules().find((schedule) => schedule.id === id)!;
+  }
+
+  deleteSchedule(id: number): void {
+    this.db.prepare("DELETE FROM schedules WHERE id = ?").run(id);
+  }
+
+  stampScheduleRun(id: number): void {
+    this.db.prepare("UPDATE schedules SET last_run_at = ? WHERE id = ?").run(timestamp(), id);
   }
 
   // Compaction cursor: the last front message id folded into the resume
@@ -2142,6 +2193,16 @@ export class BoardStore {
         heartbeat_at INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        goal_id TEXT,
+        interval_minutes INTEGER NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run_at TEXT,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS front_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         role TEXT NOT NULL,
@@ -2794,6 +2855,18 @@ function ideaFromRow(row: SqlRow): Idea {
 
 export function ideaFingerprint(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, "-").slice(0, 120);
+}
+
+function scheduleFromRow(row: SqlRow): Schedule {
+  return {
+    id: Number(row.id),
+    kind: row.kind === "scout" ? "scout" : "probe-recheck",
+    goalId: nullableString(row.goal_id),
+    intervalMinutes: Number(row.interval_minutes),
+    enabled: Number(row.enabled) === 1,
+    lastRunAt: nullableString(row.last_run_at),
+    createdAt: String(row.created_at),
+  };
 }
 
 function frontMessageFromRow(row: SqlRow): FrontMessage {

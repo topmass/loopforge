@@ -155,13 +155,7 @@ export function ChatBar({ goal }: { goal: Goal | null }) {
           disabled={busy}
           className="rounded-2xl bg-accent-strong px-5 text-sm font-semibold text-on-accent shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
-          {targetFront
-            ? "Send"
-            : targetNew
-            ? "Start"
-            : goalOpen
-            ? "Add"
-            : "Resume"}
+          {targetFront ? "Send" : targetNew ? "Start" : goalOpen ? "Add" : "Resume"}
         </button>
       </div>
       {targetNew && (

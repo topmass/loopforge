@@ -26,6 +26,7 @@ import {
 } from "../workers/git_utils.ts";
 import { GoalPlanner } from "../workers/goal_planner.ts";
 import { FrontRunner } from "../workers/front_runner.ts";
+import { runDueSchedules } from "../workers/schedules.ts";
 import { GoalPursuer } from "../workers/goal_pursuer.ts";
 import { runScout } from "../workers/goal_scout.ts";
 import { GoalLoopRunner } from "../workers/goal_loop.ts";
@@ -392,6 +393,49 @@ export function startServer(
     },
     steerGoal: (goalId, text) => steerGoal(goalId, text),
   });
+
+  // Armed schedules tick once a minute while the server runs: probe rechecks
+  // and scout passes only - never implementation, never merge approvals. The
+  // timer body must never throw (an uncaught error in a timer kills the whole
+  // process) and never overlaps itself.
+  let scheduleTickRunning = false;
+  const scheduleTimer = setInterval(() => {
+    if (scheduleTickRunning) {
+      return;
+    }
+    scheduleTickRunning = true;
+    runDueSchedules(store, {
+      listActiveLoops: () => [...activeLoops.keys()],
+      report: (message) => {
+        try {
+          const receipt = store.appendFrontMessage("front", message);
+          broadcast("front", receipt);
+        } catch {
+          // shutting down
+        }
+      },
+      runScoutPass: async () => {
+        if (scoutRunning) {
+          return;
+        }
+        scoutRunning = true;
+        try {
+          await runScout(normalizedRoot, store, {
+            onEvent: broadcastActivity,
+            createScoutClient: options.createScoutClient,
+          });
+          broadcastBoard();
+        } finally {
+          scoutRunning = false;
+        }
+      },
+      onBoardChanged: () => broadcastBoard(),
+    }).catch(() => {
+      // per-schedule failures already reported; never throw from a timer
+    }).finally(() => {
+      scheduleTickRunning = false;
+    });
+  }, 60_000);
 
   const abort = new AbortController();
   const server = Deno.serve(
@@ -1182,6 +1226,43 @@ export function startServer(
           return json({ probes: store.listProbes(goalId) }, 201);
         }
 
+        // Armed schedules CRUD.
+        if (url.pathname === "/api/schedules" && request.method === "GET") {
+          return json({ schedules: store.listSchedules() });
+        }
+        if (url.pathname === "/api/schedules" && request.method === "POST") {
+          const body = await readJson<
+            { kind?: string; intervalMinutes?: number; goalId?: string }
+          >(request);
+          if (body.kind !== "probe-recheck" && body.kind !== "scout") {
+            return json({ error: "kind must be probe-recheck or scout." }, 400);
+          }
+          try {
+            const schedule = store.createSchedule(
+              body.kind,
+              Number(body.intervalMinutes),
+              body.goalId?.trim() || undefined,
+            );
+            return json({ schedule }, 201);
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+          }
+        }
+        const scheduleMatch = url.pathname.match(/^\/api\/schedules\/(\d+)$/);
+        if (scheduleMatch && request.method === "PATCH") {
+          const body = await readJson<{ enabled?: boolean; intervalMinutes?: number }>(request);
+          try {
+            return json({ schedule: store.updateSchedule(Number(scheduleMatch[1]), body) });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return json({ error: message }, message.includes("not found") ? 404 : 400);
+          }
+        }
+        if (scheduleMatch && request.method === "DELETE") {
+          store.deleteSchedule(Number(scheduleMatch[1]));
+          return json({ ok: true });
+        }
+
         const probeMatch = url.pathname.match(/^\/api\/probes\/(\d+)$/);
         if (probeMatch && request.method === "PATCH") {
           const probeId = Number(probeMatch[1]);
@@ -1961,6 +2042,7 @@ export function startServer(
   async function closeSelf() {
     clearInterval(supervisorTimer);
     clearInterval(tailTimer);
+    clearInterval(scheduleTimer);
     openServers.delete(normalizedRoot);
     store.close();
     await Promise.all(

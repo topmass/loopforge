@@ -301,8 +301,7 @@ export function Sidebar() {
                 className="flex w-full items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-ink-faint transition hover:text-ink-muted"
               >
                 <span>{historyOpen ? "▾" : "▸"}</span>
-                history{" "}
-                <span className="text-ink-faint">{closedGoals.length}</span>
+                history <span className="text-ink-faint">{closedGoals.length}</span>
               </button>
               {historyOpen && (
                 <div className="mt-1 space-y-1">

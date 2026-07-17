@@ -32,8 +32,7 @@ function ActiveWorkersStrip(
   return (
     <div className="border-b border-line px-4 py-3">
       <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
-        Active workers{" "}
-        <span className="text-ink-faint">{chips.length} running</span>
+        Active workers <span className="text-ink-faint">{chips.length} running</span>
       </div>
       <div className="flex flex-wrap gap-2">
         {chips.map((chip) => (
@@ -112,9 +111,7 @@ export function BoardView() {
   const workers = workerChips(activeWorkers, externalAgents);
 
   // To Do / In Progress: the selected loop, or every open goal, tagged by id.
-  const columnGoals = filtered
-    ? goals.filter((g) => g.id === activeGoalId)
-    : openGoals;
+  const columnGoals = filtered ? goals.filter((g) => g.id === activeGoalId) : openGoals;
   const todo: { step: PlanStep; goalId: string }[] = [];
   const doing: { step: PlanStep; goalId: string }[] = [];
   for (const g of columnGoals) {
@@ -126,9 +123,7 @@ export function BoardView() {
   // Done: the selected loop only, or every goal (newest goal group first: goals
   // arrive oldest first). Plan items append oldest first, so items within a
   // group read newest first. Empty groups are dropped.
-  const doneSource = filtered
-    ? goals.filter((g) => g.id === activeGoalId)
-    : [...goals].reverse();
+  const doneSource = filtered ? goals.filter((g) => g.id === activeGoalId) : [...goals].reverse();
   const doneGroups = doneSource.map((g) => ({
     goal: g,
     done: (planByGoal[g.id] ?? []).filter((s) => s.status === "done").reverse(),
@@ -137,9 +132,7 @@ export function BoardView() {
   const anyContent = todo.length > 0 || doing.length > 0 ||
     doneGroups.length > 0;
 
-  const goalProbes = activeGoalId
-    ? probes.filter((p) => p.goalId === activeGoalId)
-    : [];
+  const goalProbes = activeGoalId ? probes.filter((p) => p.goalId === activeGoalId) : [];
   const passed = goalProbes.filter((p) => p.lastStatus === "passed").length;
   const running = subagents.filter((s) => s.state === "running").length;
   // Live loop telemetry for the scoped goal: shown while the loop is active
@@ -150,9 +143,7 @@ export function BoardView() {
   const statusActiveAt = useStore((
     s,
   ) => (activeGoalId ? s.loopActiveAt[activeGoalId] : undefined));
-  const scopedGoal = activeGoalId
-    ? goals.find((g) => g.id === activeGoalId)
-    : undefined;
+  const scopedGoal = activeGoalId ? goals.find((g) => g.id === activeGoalId) : undefined;
   const showLoopStatus = Boolean(
     loopStatus && scopedGoal?.status === "open" &&
       statusActiveAt !== undefined && Date.now() - statusActiveAt < 120_000,
@@ -202,8 +193,7 @@ export function BoardView() {
               title={loopStatus.reason}
             >
               iter {loopStatus.iteration}/{loopStatus.maxIterations} ·{" "}
-              {fmtTokens(loopStatus.tokensUsed)} tok ·{" "}
-              {fmtElapsed(loopStatus.elapsedMs)}
+              {fmtTokens(loopStatus.tokensUsed)} tok · {fmtElapsed(loopStatus.elapsedMs)}
               {loopStatus.reason ? ` · waiting on: ${loopStatus.reason}` : ""}
             </span>
           )}
@@ -249,9 +239,7 @@ export function BoardView() {
           <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
             Sub-agents{" "}
             <span className="text-ink-faint">
-              {running > 0
-                ? `${running} coding in parallel`
-                : `${subagents.length} merged`}
+              {running > 0 ? `${running} coding in parallel` : `${subagents.length} merged`}
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -295,8 +283,7 @@ export function BoardView() {
         {/* To Do */}
         <div className="flex flex-col gap-2.5">
           <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
-            To do{" "}
-            <span className="font-mono text-ink-faint">{todo.length}</span>
+            To do <span className="font-mono text-ink-faint">{todo.length}</span>
           </div>
           <AnimatePresence initial={false}>
             {todo.map(({ step, goalId }, i) => (
@@ -327,8 +314,7 @@ export function BoardView() {
         {/* In Progress */}
         <div className="flex flex-col gap-2.5">
           <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-muted">
-            In progress{" "}
-            <span className="font-mono text-ink-faint">{doing.length}</span>
+            In progress <span className="font-mono text-ink-faint">{doing.length}</span>
           </div>
           <AnimatePresence initial={false}>
             {doing.map(({ step, goalId }, i) => (
@@ -422,8 +408,8 @@ function EmptyState() {
       <LineMark variant="board" className="mb-1 h-12 w-12 text-ink-faint" />
       <div className="text-2xl">Describe a goal to begin</div>
       <div className="max-w-md text-sm text-ink-muted">
-        Type what you want built below. LoopForge plans it, runs one agent that
-        owns the goal, and shows its plan here live.
+        Type what you want built below. LoopForge plans it, runs one agent that owns the goal, and
+        shows its plan here live.
       </div>
     </div>
   );
@@ -463,8 +449,8 @@ function IdlePlan({ goalId }: { goalId: string }) {
           {goalId}: agent is working
         </div>
         <div className="max-w-md text-sm text-ink-muted">
-          The owning agent is planning and acting now. Its plan appears here at
-          the end of the current turn. Add a task below any time to steer it.
+          The owning agent is planning and acting now. Its plan appears here at the end of the
+          current turn. Add a task below any time to steer it.
         </div>
       </div>
     );
@@ -489,9 +475,8 @@ function IdlePlan({ goalId }: { goalId: string }) {
       <LineMark variant="board" className="h-12 w-12 text-ink-faint" />
       <div className="text-lg">No plan yet for {goalId}</div>
       <div className="max-w-md text-sm text-ink-muted">
-        Start this goal's loop and one agent will own it - planning, working,
-        and verifying - with its plan streaming here. Add tasks any time below
-        to steer it.
+        Start this goal's loop and one agent will own it - planning, working, and verifying - with
+        its plan streaming here. Add tasks any time below to steer it.
       </div>
       <button
         type="button"

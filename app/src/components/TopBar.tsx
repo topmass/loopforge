@@ -18,11 +18,7 @@ export function TopBar(
   const activity = useStore((s) => s.activity);
   const theme = useStore((s) => s.theme);
   const setTheme = useStore((s) => s.setTheme);
-  const dot = conn === "live"
-    ? "bg-ok"
-    : conn === "down"
-    ? "bg-danger"
-    : "bg-warn";
+  const dot = conn === "live" ? "bg-ok" : conn === "down" ? "bg-danger" : "bg-warn";
 
   const role = (label: string, value: string, on = true) => (
     <button
@@ -112,9 +108,7 @@ export function TopBar(
           type="button"
           onClick={onActivity}
           className={`rounded-md border border-line px-3 py-1 text-xs ${
-            activityActive
-              ? "bg-ink text-surface"
-              : "text-ink-muted hover:text-ink"
+            activityActive ? "bg-ink text-surface" : "text-ink-muted hover:text-ink"
           }`}
         >
           Activity

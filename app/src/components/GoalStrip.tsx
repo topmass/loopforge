@@ -19,9 +19,7 @@ export function GoalStrip() {
     <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
       {open.map((g) => {
         const live = now - (loopActiveAt[g.id] ?? 0) < 90_000;
-        const blocked = tasks.some((t) =>
-          t.goalId === g.id && t.status === "blocked"
-        );
+        const blocked = tasks.some((t) => t.goalId === g.id && t.status === "blocked");
         const active = g.id === activeGoalId;
         const isArmed = armed === g.id;
         const words = g.text.split(/\s+/).slice(0, 5).join(" ");
@@ -43,11 +41,7 @@ export function GoalStrip() {
           >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                blocked
-                  ? STATUS.blocked.dot
-                  : live
-                  ? STATUS.live.dot
-                  : STATUS.idle.dot
+                blocked ? STATUS.blocked.dot : live ? STATUS.live.dot : STATUS.idle.dot
               }`}
             />
             <span className="font-medium text-ink">{g.id}</span>

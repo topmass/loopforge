@@ -106,9 +106,7 @@ export function App() {
         activityActive={rightTab === "activity"}
       />
       <AnimatePresence>
-        {settingsOpen && (
-          <SettingsModal onClose={() => setSettingsOpen(false)} />
-        )}
+        {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       </AnimatePresence>
       <AlertsBar />
       <div className="flex min-h-0 flex-1">
@@ -121,9 +119,7 @@ export function App() {
           {frontSelected ? <FrontThreadView /> : (
             <>
               <CenterTabs tab={centerTab} onTab={setCenterTab} />
-              {centerTab === "board"
-                ? <BoardView />
-                : <ThreadView goal={activeGoal} />}
+              {centerTab === "board" ? <BoardView /> : <ThreadView goal={activeGoal} />}
             </>
           )}
         </main>

@@ -40,11 +40,7 @@ export function RightPanel(
           Diff
         </button>
       </div>
-      {tab === "activity"
-        ? <ActivityDrawer />
-        : tab === "diff"
-        ? <DiffPanel />
-        : <DetailPanel />}
+      {tab === "activity" ? <ActivityDrawer /> : tab === "diff" ? <DiffPanel /> : <DetailPanel />}
     </aside>
   );
 }

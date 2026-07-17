@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { useStore } from "../store";
 import { api } from "../api";
 import { spring } from "./ui";
+import type { Schedule } from "../types";
 
 const BACKENDS = ["codex", "claude", "local"] as const;
 // Install command shown in the local backend's doctor line when pi is missing.
@@ -28,6 +29,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const runtime = useStore((s) => s.runtime);
   const setRuntime = useStore((s) => s.setRuntime);
   const [saving, setSaving] = useState<string | null>(null);
+  // Armed schedules: loaded on open, mutated in place.
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  useEffect(() => {
+    void api.listSchedules().then((r) => setSchedules(r.schedules)).catch(() => {});
+  }, []);
+  const reloadSchedules = async () => {
+    setSchedules((await api.listSchedules()).schedules);
+  };
   // Whether the Claude picker is showing its free-text box (an unknown model, or
   // the user explicitly chose "other...").
   const [claudeOther, setClaudeOther] = useState(false);
@@ -98,9 +107,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             ✕
           </button>
         </div>
-        {saving && (
-          <div className="mb-2 text-xs text-accent">Saving {saving}...</div>
-        )}
+        {saving && <div className="mb-2 text-xs text-accent">Saving {saving}...</div>}
 
         <div className="flex items-center justify-between gap-3 border-b border-line py-3">
           <div>
@@ -112,8 +119,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
           <select
             value={runtime?.backendRaw ?? "codex"}
-            onChange={(e) =>
-              void wrap("main backend", () => api.setBackend(e.target.value))}
+            onChange={(e) => void wrap("main backend", () => api.setBackend(e.target.value))}
             className="rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
           >
             {BACKENDS.map((b) => (
@@ -133,9 +139,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               "rescue",
               () =>
                 api.setRescue(
-                  v === "off"
-                    ? { enabled: false }
-                    : { enabled: true, backend: v },
+                  v === "off" ? { enabled: false } : { enabled: true, backend: v },
                 ),
             )}
         />
@@ -148,9 +152,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               "planner",
               () =>
                 api.setPlanner(
-                  v === "off"
-                    ? { enabled: false }
-                    : { enabled: true, backend: v },
+                  v === "off" ? { enabled: false } : { enabled: true, backend: v },
                 ),
             )}
         />
@@ -163,9 +165,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               "scout",
               () =>
                 api.setScout(
-                  v === "off"
-                    ? { enabled: false }
-                    : { enabled: true, backend: v },
+                  v === "off" ? { enabled: false } : { enabled: true, backend: v },
                 ),
             )}
         />
@@ -174,8 +174,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="border-b border-line py-3">
           <div className="text-sm font-medium text-ink">Model power</div>
           <div className="text-xs text-ink-muted">
-            How hard the models think. codex is per-project; claude is
-            machine-wide.
+            How hard the models think. codex is per-project; claude is machine-wide.
           </div>
 
           <div className="mt-3 space-y-2">
@@ -192,8 +191,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               defaultValue={runtime?.config?.model ?? ""}
               placeholder="model id (e.g. gpt-5.4)"
               onBlur={(e) =>
-                void wrap("codex model", () =>
-                  api.setConfig({ model: e.target.value.trim() }))}
+                void wrap("codex model", () => api.setConfig({ model: e.target.value.trim() }))}
               className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
             />
             <div className="flex items-center gap-2">
@@ -286,8 +284,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   setClaudeOther(false);
                   void wrap(
                     "claude model",
-                    () =>
-                      api.setClaudeModel(e.target.value),
+                    () => api.setClaudeModel(e.target.value),
                   );
                 }}
                 className="flex-1 rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
@@ -354,8 +351,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="text-[11px] text-ink-faint">
-              runs your local Claude Code (claude CLI) with its native effort
-              levels
+              runs your local Claude Code (claude CLI) with its native effort levels
             </div>
           </div>
 
@@ -385,8 +381,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     role="button"
                     tabIndex={-1}
                     title="Copy"
-                    onClick={() =>
-                      void navigator.clipboard?.writeText(PI_INSTALL)}
+                    onClick={() => void navigator.clipboard?.writeText(PI_INSTALL)}
                     className="cursor-pointer rounded bg-surface-sunken px-1 py-0.5 font-mono text-ink-muted"
                   >
                     {PI_INSTALL}
@@ -421,8 +416,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   className="w-full rounded-xl border border-line bg-surface-sunken px-2.5 py-1.5 text-sm outline-none focus:border-accent"
                 />
                 <div className="text-[11px] text-ink-faint">
-                  override to route through pi's own providers instead of the
-                  local endpoint
+                  override to route through pi's own providers instead of the local endpoint
                 </div>
               </div>
             </details>
@@ -435,8 +429,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               Parallel sub-agents
             </div>
             <div className="text-xs text-ink-muted">
-              Max sub-agents the main agent runs at once. It is told to fan out
-              work up to this many.
+              Max sub-agents the main agent runs at once. It is told to fan out work up to this
+              many.
             </div>
           </div>
           <div className="flex items-center gap-1 rounded-xl border border-line bg-surface-sunken p-1">
@@ -480,9 +474,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               Isolated worktrees
             </div>
             <div className="text-xs text-ink-muted">
-              Run each loop in its own git worktree and merge only on green
-              probes. Off = agents work directly in this project folder, you own
-              git, and fan-out is unavailable.
+              Run each loop in its own git worktree and merge only on green probes. Off = agents
+              work directly in this project folder, you own git, and fan-out is unavailable.
             </div>
           </div>
           <input
@@ -503,8 +496,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               Push sub-agent branches
             </div>
             <div className="text-xs text-ink-muted">
-              When a fan-out sub-agent finishes, push its branch to origin (if
-              any); the loop still merges everything at the end.
+              When a fan-out sub-agent finishes, push its branch to origin (if any); the loop still
+              merges everything at the end.
             </div>
           </div>
           <input
@@ -519,10 +512,78 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           />
         </label>
 
+        <div className="border-t border-line py-3">
+          <div className="text-sm font-medium text-ink">Schedules</div>
+          <div className="text-xs text-ink-muted">
+            Recurring probe re-checks and scout passes while the server runs. Schedules never start
+            implementation or approve held merges.
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {schedules.map((schedule) => (
+              <div
+                key={schedule.id}
+                className="flex items-center gap-2 rounded-xl border border-line bg-surface-raised px-3 py-1.5 text-xs"
+              >
+                <input
+                  type="checkbox"
+                  checked={schedule.enabled}
+                  onChange={(e) =>
+                    void wrap("schedule", async () => {
+                      await api.updateSchedule(schedule.id, { enabled: e.target.checked });
+                      await reloadSchedules();
+                    })}
+                  className="h-3.5 w-3.5 accent-accent"
+                />
+                <span className="min-w-0 flex-1 truncate text-ink">
+                  {schedule.kind === "scout" ? "Scout pass" : "Probe re-check"} · every{" "}
+                  {schedule.intervalMinutes}m
+                </span>
+                <span className="shrink-0 text-ink-faint">
+                  {schedule.lastRunAt ? `last ${schedule.lastRunAt.slice(11, 16)}` : "never run"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void wrap("schedule", async () => {
+                      await api.deleteSchedule(schedule.id);
+                      await reloadSchedules();
+                    })}
+                  className="shrink-0 text-ink-faint transition hover:text-danger"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={() =>
+                  void wrap("schedule", async () => {
+                    await api.createSchedule("probe-recheck", 60);
+                    await reloadSchedules();
+                  })}
+                className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink-muted transition hover:bg-surface-sunken"
+              >
+                + Probe re-check hourly
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void wrap("schedule", async () => {
+                    await api.createSchedule("scout", 240);
+                    await reloadSchedules();
+                  })}
+                className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink-muted transition hover:bg-surface-sunken"
+              >
+                + Scout every 4h
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-4 text-xs text-ink-muted">
-          Changes apply to new work immediately. codex uses your Codex login;
-          claude uses Anthropic usage; local runs the pi coding agent on your
-          configured local model.
+          Changes apply to new work immediately. codex uses your Codex login; claude uses Anthropic
+          usage; local runs the pi coding agent on your configured local model.
         </div>
       </motion.div>
     </motion.div>
